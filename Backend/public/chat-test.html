@@ -1,0 +1,1470 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Complete Chat System Test</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { 
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+        margin: 0; 
+        padding: 20px; 
+        background: #f5f5f5; 
+        color: #333;
+      }
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      }
+      .container { 
+        display: flex; 
+        gap: 20px; 
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .panel { 
+        background: white;
+        border-radius: 12px;
+        padding: 20px; 
+        width: 45%; 
+        min-width: 400px; 
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        border: 1px solid #e0e0e0;
+      }
+      .panel-title { 
+        font-weight: 600; 
+        margin-bottom: 15px; 
+        color: #2d3748;
+        font-size: 18px;
+        border-bottom: 2px solid #e2e8f0;
+        padding-bottom: 10px;
+      }
+      .auth-section {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        border: 1px solid #e9ecef;
+      }
+      .input-group {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .input-group label {
+        font-weight: 500;
+        min-width: 100px;
+        color: #4a5568;
+      }
+      .input-group input {
+        flex: 1;
+        padding: 8px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      .btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s;
+      }
+      .btn-primary {
+        background: #3b82f6;
+        color: white;
+      }
+      .btn-primary:hover {
+        background: #2563eb;
+        transform: translateY(-1px);
+      }
+      .btn-secondary {
+        background: #6b7280;
+        color: white;
+      }
+      .btn-secondary:hover {
+        background: #4b5563;
+      }
+      .btn-success {
+        background: #10b981;
+        color: white;
+      }
+      .btn-success:hover {
+        background: #059669;
+      }
+      .btn-danger {
+        background: #ef4444;
+        color: white;
+      }
+      .btn-danger:hover {
+        background: #dc2626;
+      }
+      .status {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .status-online { background: #d1fae5; color: #065f46; }
+      .status-offline { background: #fee2e2; color: #991b1b; }
+      .status-connected { background: #dbeafe; color: #1e40af; }
+      .status-error { background: #fef2f2; color: #dc2626; }
+      
+      .section { 
+        margin-bottom: 20px; 
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+      }
+      .section-title {
+        font-weight: 600;
+        margin-bottom: 10px;
+        color: #2d3748;
+        font-size: 16px;
+      }
+      .contacts { 
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 15px; 
+      }
+      .contact-btn { 
+        padding: 8px 12px;
+        background: white;
+        border: 1px solid #d1d5db;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .contact-btn:hover {
+        background: #3b82f6;
+        color: white;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+      .contact-btn.active {
+        background: #3b82f6;
+        color: white;
+        border-color: #3b82f6;
+      }
+      .online-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #10b981;
+      }
+      .offline-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #6b7280;
+      }
+      
+      .conversations {
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: white;
+      }
+      .conversation-item {
+        padding: 12px;
+        border-bottom: 1px solid #f3f4f6;
+        cursor: pointer;
+        transition: background 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .conversation-item:hover {
+        background: #f8fafc;
+      }
+      .conversation-item.active {
+        background: #dbeafe;
+        border-left: 3px solid #3b82f6;
+      }
+      .conversation-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: #e5e7eb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        color: #6b7280;
+      }
+      .conversation-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .conversation-name {
+        font-weight: 500;
+        color: #1f2937;
+        margin-bottom: 2px;
+      }
+      .conversation-last-message {
+        font-size: 12px;
+        color: #6b7280;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .conversation-meta {
+        text-align: right;
+        font-size: 11px;
+        color: #9ca3af;
+      }
+      .unread-badge {
+        background: #ef4444;
+        color: white;
+        border-radius: 10px;
+        padding: 2px 6px;
+        font-size: 10px;
+        font-weight: 600;
+        margin-left: 5px;
+      }
+      
+      .chat { 
+        border: 1px solid #e5e7eb; 
+        padding: 0; 
+        background: white; 
+        border-radius: 8px; 
+        height: 400px;
+        display: flex;
+        flex-direction: column;
+      }
+      .chat-header {
+        background: #f8f9fa;
+        padding: 12px 16px;
+        border-bottom: 1px solid #e5e7eb;
+        border-radius: 8px 8px 0 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .chat-user-info {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .chat-user-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #e5e7eb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        color: #6b7280;
+        font-size: 12px;
+      }
+      .chat-user-name {
+        font-weight: 500;
+        color: #1f2937;
+      }
+      .chat-actions {
+        display: flex;
+        gap: 8px;
+      }
+      
+      .messages { 
+        flex: 1;
+        padding: 16px; 
+        background: #fafafa; 
+        overflow-y: auto; 
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .msg-row { 
+        display: flex; 
+        margin-bottom: 8px; 
+      }
+      .msg-sent { 
+        justify-content: flex-end; 
+      }
+      .msg-received { 
+        justify-content: flex-start; 
+      }
+      .msg-bubble { 
+        max-width: 70%; 
+        padding: 10px 14px; 
+        border-radius: 18px; 
+        font-size: 14px; 
+        position: relative;
+        word-wrap: break-word;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      }
+      .msg-sent .msg-bubble { 
+        background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+        color: white; 
+        border-bottom-right-radius: 4px; 
+      }
+      .msg-received .msg-bubble { 
+        background: white;
+        color: #1f2937; 
+        border: 1px solid #e5e7eb;
+        border-bottom-left-radius: 4px; 
+      }
+      .msg-meta { 
+        font-size: 11px; 
+        color: rgba(255,255,255,0.7); 
+        margin-top: 4px; 
+      }
+      .msg-received .msg-meta {
+        color: #9ca3af;
+      }
+      .msg-sender {
+        font-weight: 600;
+        margin-bottom: 2px;
+        font-size: 12px;
+      }
+      .msg-received .msg-sender {
+        color: #6b7280;
+      }
+      
+      .typing-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #f3f4f6;
+        border-radius: 18px;
+        margin: 4px 0;
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .typing-dots {
+        display: flex;
+        gap: 2px;
+      }
+      .typing-dot {
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: #9ca3af;
+        animation: typing 1.4s infinite ease-in-out;
+      }
+      .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+      .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+      
+      @keyframes typing {
+        0%, 60%, 100% { transform: translateY(0); }
+        30% { transform: translateY(-10px); }
+      }
+      
+      .chat-input { 
+        padding: 16px; 
+        border-top: 1px solid #e5e7eb;
+        background: white;
+        border-radius: 0 0 8px 8px;
+      }
+      .input-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .input-row input {
+        flex: 1;
+        padding: 10px 14px;
+        border: 1px solid #d1d5db;
+        border-radius: 20px;
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      .input-row input:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      }
+      
+      .error { 
+        color: #dc2626; 
+        background: #fef2f2;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #fecaca;
+        margin: 10px 0;
+        font-size: 14px;
+      }
+      .success {
+        color: #059669;
+        background: #ecfdf5;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #a7f3d0;
+        margin: 10px 0;
+        font-size: 14px;
+      }
+      .info {
+        color: #1e40af;
+        background: #eff6ff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #bfdbfe;
+        margin: 10px 0;
+        font-size: 14px;
+      }
+      
+      .loading {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      .hidden { display: none !important; }
+      
+      .permissions-info {
+        background: #f0f9ff;
+        border: 1px solid #bae6fd;
+        border-radius: 6px;
+        padding: 12px;
+        margin: 10px 0;
+        font-size: 13px;
+        color: #0c4a6e;
+      }
+      
+      .permissions-list {
+        margin-top: 8px;
+        padding-left: 16px;
+      }
+      
+      .permissions-list li {
+        margin: 4px 0;
+        color: #0369a1;
+      }
+      
+      .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: #6b7280;
+      }
+      
+      .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+      }
+      
+      .empty-state-text {
+        font-size: 16px;
+        margin-bottom: 8px;
+        font-weight: 500;
+      }
+      
+      .empty-state-subtext {
+        font-size: 14px;
+        opacity: 0.7;
+      }
+      
+      @media (max-width: 768px) {
+        .container {
+          flex-direction: column;
+        }
+        .panel {
+          width: 100%;
+          min-width: auto;
+        }
+      }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body>
+    <div class="header">
+      <h1>🚀 Complete Chat System Test</h1>
+      <p>Test all features of the Telecom Sales CRM Chat System</p>
+    </div>
+    
+    <div class="container">
+      <div class="panel" id="panel1">
+        <div class="panel-title">👤 User 1 (Agent/Team Lead)</div>
+        
+        <div class="auth-section">
+          <div class="input-group">
+            <label for="tokenInput1"><b>JWT Token:</b></label>
+            <input id="tokenInput1" type="text" placeholder="Paste JWT token here">
+            <button id="setTokenBtn1" class="btn btn-primary">Set Token</button>
+          </div>
+          <div id="tokenStatus1" class="status status-error">Not Connected</div>
+          <div id="permissions1" class="permissions-info hidden">
+            <strong>Your Permissions:</strong>
+            <ul id="permissionsList1" class="permissions-list"></ul>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">👥 Contacts</div>
+          <div id="contacts1"></div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">💬 Conversations</div>
+          <div id="conversations1" class="conversations"></div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">🌐 Online Status <button class="btn btn-secondary" id="refreshStatus1" style="float: right; padding: 4px 8px; font-size: 12px;">Refresh</button></div>
+          <div id="onlineStatus1"></div>
+        </div>
+        
+        <div id="chat1"></div>
+      </div>
+      
+      <div class="panel" id="panel2">
+        <div class="panel-title">👤 User 2 (Agent/Team Lead)</div>
+        
+        <div class="auth-section">
+          <div class="input-group">
+            <label for="tokenInput2"><b>JWT Token:</b></label>
+            <input id="tokenInput2" type="text" placeholder="Paste JWT token here">
+            <button id="setTokenBtn2" class="btn btn-primary">Set Token</button>
+          </div>
+          <div id="tokenStatus2" class="status status-error">Not Connected</div>
+          <div id="permissions2" class="permissions-info hidden">
+            <strong>Your Permissions:</strong>
+            <ul id="permissionsList2" class="permissions-list"></ul>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">👥 Contacts</div>
+          <div id="contacts2"></div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">💬 Conversations</div>
+          <div id="conversations2" class="conversations"></div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">🌐 Online Status <button class="btn btn-secondary" id="refreshStatus2" style="float: right; padding: 4px 8px; font-size: 12px;">Refresh</button></div>
+          <div id="onlineStatus2"></div>
+        </div>
+        
+        <div id="chat2"></div>
+      </div>
+    </div>
+    <script>
+      // Comprehensive state for each panel
+      const state = [
+        { 
+          token: '', 
+          sessionId: null, 
+          selectedUserId: null, 
+          selectedUserName: null, 
+          contacts: { teamLeads: [], agents: [], permissions: {} }, 
+          conversations: [],
+          onlineUsers: [],
+          socket: null, 
+          messages: [],
+          typingUsers: new Set(),
+          selfId: null,
+          selfName: '',
+          isConnected: false,
+          currentPage: 1,
+          hasMoreMessages: true
+        },
+        { 
+          token: '', 
+          sessionId: null, 
+          selectedUserId: null, 
+          selectedUserName: null, 
+          contacts: { teamLeads: [], agents: [], permissions: {} }, 
+          conversations: [],
+          onlineUsers: [],
+          socket: null, 
+          messages: [],
+          typingUsers: new Set(),
+          selfId: null,
+          selfName: '',
+          isConnected: false,
+          currentPage: 1,
+          hasMoreMessages: true
+        }
+      ];
+
+      // Helper to get headers for a panel
+      function getAuthHeaders(idx) {
+        const token = state[idx].token;
+        return token ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+      }
+
+      // Update status display
+      function updateStatus(idx, status, message) {
+        const statusEl = document.getElementById(`tokenStatus${idx+1}`);
+        statusEl.textContent = message;
+        statusEl.className = `status status-${status}`;
+      }
+
+      // Set token handlers
+      document.getElementById('setTokenBtn1').addEventListener('click', function() {
+        const token = document.getElementById('tokenInput1').value.trim();
+        state[0].token = token;
+        if (token) {
+          updateStatus(0, 'connected', 'Connected');
+          setupSocket(0);
+        } else {
+          updateStatus(0, 'error', 'Not Connected');
+          clearAll(0);
+        }
+      });
+      
+      document.getElementById('setTokenBtn2').addEventListener('click', function() {
+        const token = document.getElementById('tokenInput2').value.trim();
+        state[1].token = token;
+        if (token) {
+          updateStatus(1, 'connected', 'Connected');
+          setupSocket(1);
+        } else {
+          updateStatus(1, 'error', 'Not Connected');
+          clearAll(1);
+        }
+      });
+
+      // Clear all data for a panel
+      function clearAll(idx) {
+        document.getElementById('contacts' + (idx+1)).innerHTML = '';
+        document.getElementById('conversations' + (idx+1)).innerHTML = '';
+        document.getElementById('onlineStatus' + (idx+1)).innerHTML = '';
+        document.getElementById('chat' + (idx+1)).innerHTML = '';
+        document.getElementById(`permissions${idx+1}`).classList.add('hidden');
+        state[idx] = {
+          token: '', sessionId: null, selectedUserId: null, selectedUserName: null, 
+          contacts: { teamLeads: [], agents: [], permissions: {} }, 
+          conversations: [], onlineUsers: [], socket: null, messages: [],
+          typingUsers: new Set(), selfId: null, selfName: '', isConnected: false,
+          currentPage: 1, hasMoreMessages: true
+        };
+        disconnectSocket(idx);
+      }
+
+      // Fetch contacts for a panel
+
+      // Fetch conversations for a panel
+      async function fetchConversations(idx) {
+        const conversationsDiv = document.getElementById('conversations' + (idx+1));
+        
+        try {
+          const res = await fetch('/api/chat/conversations', { headers: getAuthHeaders(idx) });
+          const data = await res.json();
+          
+          if (!res.ok) {
+            conversationsDiv.innerHTML = `<div class='error'>Error: ${data.error || 'Unknown error'}</div>`;
+            return;
+          }
+          
+          state[idx].conversations = data.conversations || [];
+          renderConversations(idx);
+          
+        } catch (err) {
+          conversationsDiv.innerHTML = `<div class='error'>Fetch error: ${err.message}</div>`;
+        }
+      }
+
+      // Render conversations list
+      function renderConversations(idx) {
+        const conversationsDiv = document.getElementById('conversations' + (idx+1));
+        const conversations = state[idx].conversations;
+        
+        if (!conversations || conversations.length === 0) {
+          conversationsDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💬</div><div class="empty-state-text">No conversations</div><div class="empty-state-subtext">Start a chat with someone</div></div>';
+          return;
+        }
+        
+        let html = '';
+        conversations.forEach(conv => {
+          const otherUser = conv.otherUser;
+          const lastMessage = conv.lastMessage;
+          const unreadCount = conv.unreadCount || 0;
+          const isActive = conv.id === state[idx].sessionId;
+          
+          html += `<div class='conversation-item ${isActive ? 'active' : ''}' data-conversation-id='${conv.id}'>
+            <div class='conversation-avatar'>${otherUser ? otherUser.name.charAt(0).toUpperCase() : '?'}</div>
+            <div class='conversation-info'>
+              <div class='conversation-name'>${otherUser ? otherUser.name : 'Unknown User'}</div>
+              <div class='conversation-last-message'>${lastMessage ? lastMessage.content : 'No messages yet'}</div>
+            </div>
+            <div class='conversation-meta'>
+              ${lastMessage ? new Date(lastMessage.createdAt).toLocaleTimeString() : ''}
+              ${unreadCount > 0 ? `<span class='unread-badge'>${unreadCount}</span>` : ''}
+            </div>
+          </div>`;
+        });
+        
+        conversationsDiv.innerHTML = html;
+        
+        // Add event listeners
+        conversationsDiv.querySelectorAll('.conversation-item').forEach(item => {
+          item.addEventListener('click', function() {
+            const conversationId = this.getAttribute('data-conversation-id');
+            const conversation = conversations.find(c => c.id === conversationId);
+            if (conversation && conversation.otherUser) {
+              startChatFromConversation(idx, conversationId, conversation.otherUser.id, conversation.otherUser.name);
+            }
+          });
+        });
+      }
+
+      // Request online status via Socket.IO
+      function requestOnlineStatus(idx) {
+        if (state[idx].socket && state[idx].isConnected) {
+          console.log(`[Socket.IO][Panel ${idx+1}] Requesting online status`);
+          state[idx].socket.emit('getOnlineStatus');
+        } else {
+          console.log(`[Socket.IO][Panel ${idx+1}] Cannot request online status - socket not connected`);
+        }
+      }
+
+      // Render contacts
+      function renderContacts(idx) {
+        const contactsDiv = document.getElementById('contacts' + (idx+1));
+        const data = state[idx].contacts;
+        
+        if (!data || (!data.teamLeads && !data.agents)) {
+          contactsDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">👥</div><div class="empty-state-text">No contacts available</div><div class="empty-state-subtext">You may not have permission to chat with anyone</div></div>';
+          return;
+        }
+        
+        let html = '';
+        
+        // Team Leads
+        if (data.teamLeads && data.teamLeads.length > 0) {
+          html += '<div class="section-title">Team Leads</div><div class="contacts">';
+          data.teamLeads.forEach(u => {
+            const isOnline = u.isOnline || false;
+            html += `<button class='contact-btn' data-id='${u.id}' data-name='${u.name}' data-email='${u.email}'>
+              <span class='${isOnline ? 'online-indicator' : 'offline-indicator'}'></span>
+              ${u.name}
+            </button>`;
+          });
+          html += '</div>';
+        }
+        
+        // Agents
+        if (data.agents && data.agents.length > 0) {
+          html += '<div class="section-title">Agents</div><div class="contacts">';
+          data.agents.forEach(u => {
+            const isOnline = u.isOnline || false;
+            html += `<button class='contact-btn' data-id='${u.id}' data-name='${u.name}' data-email='${u.email}'>
+              <span class='${isOnline ? 'online-indicator' : 'offline-indicator'}'></span>
+              ${u.name}
+            </button>`;
+          });
+          html += '</div>';
+        }
+        
+        if (!html) {
+          html = '<div class="empty-state"><div class="empty-state-icon">👥</div><div class="empty-state-text">No contacts available</div><div class="empty-state-subtext">You may not have permission to chat with anyone</div></div>';
+        }
+        
+        contactsDiv.innerHTML = html;
+        
+        // Add event listeners
+        contactsDiv.querySelectorAll('.contact-btn').forEach(btn => {
+          btn.addEventListener('click', function() {
+            startChat(idx, this.getAttribute('data-id'), this.getAttribute('data-name'));
+          });
+        });
+      }
+
+      // Render online status
+      function renderOnlineStatus(idx) {
+        const onlineStatusDiv = document.getElementById('onlineStatus' + (idx+1));
+        const users = state[idx].onlineUsers;
+        
+        if (!users || users.length === 0) {
+          onlineStatusDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🌐</div><div class="empty-state-text">No users online</div></div>';
+          return;
+        }
+        
+        let html = '<div class="contacts">';
+        users.forEach(user => {
+          html += `<div class='contact-btn'>
+            <span class='${user.isOnline ? 'online-indicator' : 'offline-indicator'}'></span>
+            ${user.fullName || user.firstName + ' ' + (user.lastName || '')}
+            <span class='status status-${user.isOnline ? 'online' : 'offline'}'>${user.isOnline ? 'Online' : 'Offline'}</span>
+          </div>`;
+        });
+        html += '</div>';
+        
+        onlineStatusDiv.innerHTML = html;
+      }
+
+      // Start chat from conversation
+      async function startChatFromConversation(idx, conversationId, userId, name) {
+        state[idx].selectedUserId = userId;
+        state[idx].selectedUserName = name;
+        state[idx].sessionId = conversationId;
+        state[idx].messages = [];
+        state[idx].currentPage = 1;
+        state[idx].hasMoreMessages = true;
+        
+        renderChat(idx);
+        fetchMessages(idx);
+        setupSocket(idx);
+      }
+
+      // Start chat for a panel
+      async function startChat(idx, userId, name) {
+        try {
+          updateStatus(idx, 'connected', 'Creating conversation...');
+          
+          const res = await fetch('/api/chat/conversations', {
+            method: 'POST',
+            headers: getAuthHeaders(idx),
+            body: JSON.stringify({ targetUserId: parseInt(userId) })
+          });
+          
+          const data = await res.json();
+          
+          if (!res.ok) {
+            throw new Error(data.error || 'Failed to create conversation');
+          }
+          
+          state[idx].selectedUserId = userId;
+          state[idx].selectedUserName = name;
+          state[idx].sessionId = data.conversationId;
+          state[idx].messages = [];
+          state[idx].currentPage = 1;
+          state[idx].hasMoreMessages = true;
+          
+          renderChat(idx);
+          fetchMessages(idx);
+          setupSocket(idx);
+          fetchConversations(idx); // Refresh conversations list
+          
+          updateStatus(idx, 'connected', 'Connected');
+          
+        } catch (err) {
+          updateStatus(idx, 'error', 'Failed to start chat');
+          showError(idx, `Failed to start chat: ${err.message}`);
+        }
+      }
+
+      // Setup Socket.IO for a panel
+      function setupSocket(idx) {
+        disconnectSocket(idx);
+        const token = state[idx].token;
+        if (!token) return;
+        
+        const socket = io({
+          auth: { token }
+        });
+        
+        state[idx].socket = socket;
+        state[idx].isConnected = false;
+        
+        socket.on('connect', () => {
+          console.log(`[Socket.IO][Panel ${idx+1}] Connected`);
+          state[idx].isConnected = true;
+          updateStatus(idx, 'connected', 'Connected');
+          
+          // Request all data via Socket.IO
+          socket.emit('getContacts');
+          socket.emit('getConversations');
+          socket.emit('getOnlineStatus');
+          
+          if (state[idx].sessionId) {
+            socket.emit('joinSession', state[idx].sessionId);
+            console.log(`[Socket.IO][Panel ${idx+1}] Joined session: ${state[idx].sessionId}`);
+          }
+        });
+        
+        socket.on('disconnect', () => {
+          console.log(`[Socket.IO][Panel ${idx+1}] Disconnected`);
+          state[idx].isConnected = false;
+          updateStatus(idx, 'error', 'Disconnected');
+        });
+        
+        socket.on('conversationLoaded', (data) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] Conversation loaded:`, data);
+          if (data.messages) {
+            state[idx].messages = data.messages;
+            renderMessages(idx);
+          }
+        });
+        
+        socket.on('newMessage', (msg) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] New message:`, msg);
+          console.log(`[Socket.IO][Panel ${idx+1}] Current sessionId:`, state[idx].sessionId);
+          console.log(`[Socket.IO][Panel ${idx+1}] Message conversationId:`, msg.conversationId);
+          if (msg && msg.senderId && msg.content && msg.createdAt) {
+            state[idx].messages.push(msg);
+            renderMessages(idx);
+            
+            // Update conversations list if this is the current conversation
+            if (msg.conversationId === state[idx].sessionId) {
+              fetchConversations(idx);
+            }
+          }
+        });
+        
+        socket.on('userTyping', (data) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] User typing:`, data);
+          if (data.conversationId === state[idx].sessionId) {
+            if (data.isTyping) {
+              state[idx].typingUsers.add(data.userId);
+            } else {
+              state[idx].typingUsers.delete(data.userId);
+            }
+            renderTypingIndicator(idx);
+          }
+        });
+        
+        socket.on('messagesRead', (data) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] Messages read:`, data);
+          if (data.conversationId === state[idx].sessionId) {
+            // Update message read status
+            state[idx].messages.forEach(msg => {
+              if (msg.senderId !== state[idx].selfId) {
+                msg.isRead = true;
+                msg.readAt = data.timestamp;
+              }
+            });
+            renderMessages(idx);
+          }
+        });
+
+        socket.on('messagesMarkedAsRead', (data) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] Messages marked as read:`, data);
+          if (data.conversationId === state[idx].sessionId) {
+            // Update local messages to show as read
+            state[idx].messages.forEach(msg => {
+              if (msg.senderId != state[idx].selfId) {
+                msg.isRead = true;
+                msg.readAt = data.readAt;
+              }
+            });
+            renderMessages(idx);
+            fetchConversations(idx); // Refresh conversations list
+          }
+        });
+        
+        socket.on('contactsUpdate', (data) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] Contacts update:`, data);
+          state[idx].contacts = data;
+          state[idx].selfId = data.selfId;
+          state[idx].selfName = data.selfName || '';
+          
+          // Show permissions
+          const permissionsDiv = document.getElementById(`permissions${idx+1}`);
+          const permissionsList = document.getElementById(`permissionsList${idx+1}`);
+          const permissions = data.permissions || {};
+          permissionsList.innerHTML = '';
+          Object.entries(permissions).forEach(([key, value]) => {
+            if (value) {
+              const li = document.createElement('li');
+              li.textContent = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+              permissionsList.appendChild(li);
+            }
+          });
+          permissionsDiv.classList.remove('hidden');
+          
+          renderContacts(idx);
+        });
+
+        socket.on('onlineStatusUpdate', (data) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] Online status update:`, data);
+          state[idx].onlineUsers = data.users || [];
+          renderOnlineStatus(idx);
+          renderContacts(idx); // Refresh contacts to update online indicators
+        });
+
+        socket.on('userStatusChanged', (data) => {
+          console.log(`[Socket.IO][Panel ${idx+1}] User status changed:`, data);
+          
+          // Handle single user status change
+          if (data.userId) {
+            const userIndex = state[idx].onlineUsers.findIndex(u => u.id === data.userId);
+            if (userIndex !== -1) {
+              state[idx].onlineUsers[userIndex].isOnline = data.isOnline;
+              state[idx].onlineUsers[userIndex].lastSeen = data.lastSeen;
+            }
+          }
+          
+          // Handle multiple user status changes (from cleanup)
+          if (data.userIds && Array.isArray(data.userIds)) {
+            data.userIds.forEach(userId => {
+              const userIndex = state[idx].onlineUsers.findIndex(u => u.id === userId);
+              if (userIndex !== -1) {
+                state[idx].onlineUsers[userIndex].isOnline = data.isOnline;
+                state[idx].onlineUsers[userIndex].lastSeen = data.lastSeen;
+              }
+            });
+          }
+          
+          renderOnlineStatus(idx);
+          renderContacts(idx); // Refresh contacts to update online indicators
+        });
+        
+        socket.on('error', (err) => {
+          console.error(`[Socket.IO][Panel ${idx+1}] Error:`, err);
+          showError(idx, `Socket error: ${err.message || err}`);
+        });
+      }
+
+      // Disconnect socket for a panel
+      function disconnectSocket(idx) {
+        if (state[idx].socket) {
+          state[idx].socket.disconnect();
+          state[idx].socket = null;
+          state[idx].isConnected = false;
+        }
+      }
+
+      // Render chat UI for a panel
+      function renderChat(idx) {
+        const chatDiv = document.getElementById('chat' + (idx+1));
+        if (!state[idx].sessionId || !state[idx].selectedUserName) {
+          chatDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💬</div><div class="empty-state-text">Select a contact to start chatting</div></div>';
+          return;
+        }
+        
+        const otherUser = state[idx].contacts.teamLeads.concat(state[idx].contacts.agents || [])
+          .find(u => u.id == state[idx].selectedUserId);
+        const isOnline = otherUser ? (state[idx].onlineUsers.find(ou => ou.id == state[idx].selectedUserId)?.isOnline || false) : false;
+        
+        chatDiv.innerHTML = `
+          <div class='chat'>
+            <div class='chat-header'>
+              <div class='chat-user-info'>
+                <div class='chat-user-avatar'>${state[idx].selectedUserName.charAt(0).toUpperCase()}</div>
+                <div>
+                  <div class='chat-user-name'>${state[idx].selectedUserName}</div>
+                  <div class='status status-${isOnline ? 'online' : 'offline'}'>${isOnline ? 'Online' : 'Offline'}</div>
+                </div>
+              </div>
+              <div class='chat-actions'>
+                <button class='btn btn-danger' id='endChatBtn${idx}'>End Chat</button>
+              </div>
+            </div>
+            <div class='messages' id='messages${idx}'></div>
+            <div id='typingIndicator${idx}'></div>
+            <div class='chat-input'>
+              <div class='input-row'>
+                <input id='msg${idx}' placeholder='Type your message...' autocomplete='off'>
+                <button class='btn btn-primary' id='sendMsgBtn${idx}'>Send</button>
+              </div>
+            </div>
+          </div>
+        `;
+        
+        // Add event listeners
+        document.getElementById('sendMsgBtn' + idx).addEventListener('click', () => sendMsg(idx));
+        document.getElementById('endChatBtn' + idx).addEventListener('click', () => endChat(idx));
+        
+        const msgInput = document.getElementById('msg' + idx);
+        let typingTimeout;
+        
+        msgInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMsg(idx);
+          }
+        });
+        
+        msgInput.addEventListener('input', () => {
+          if (state[idx].socket && state[idx].sessionId) {
+            // Send typing indicator
+            state[idx].socket.emit('typing', { 
+              conversationId: state[idx].sessionId, 
+              isTyping: true 
+            });
+            
+            // Clear previous timeout
+            clearTimeout(typingTimeout);
+            
+            // Set timeout to stop typing indicator
+            typingTimeout = setTimeout(() => {
+              if (state[idx].socket && state[idx].sessionId) {
+                state[idx].socket.emit('typing', { 
+                  conversationId: state[idx].sessionId, 
+                  isTyping: false 
+                });
+              }
+            }, 1000);
+          }
+        });
+        
+        renderMessages(idx);
+      }
+
+      // Render messages for a panel
+      function renderMessages(idx) {
+        const messagesDiv = document.getElementById('messages' + idx);
+        if (!messagesDiv) return;
+        
+        let html = '';
+        const messages = state[idx].messages;
+        
+        if (messages.length === 0) {
+          html = '<div class="empty-state"><div class="empty-state-icon">💬</div><div class="empty-state-text">No messages yet</div><div class="empty-state-subtext">Start the conversation!</div></div>';
+        } else {
+          messages.forEach((m, index) => {
+            const isSent = m.senderId == state[idx].selfId;
+            const rowClass = isSent ? 'msg-row msg-sent' : 'msg-row msg-received';
+            const bubbleClass = 'msg-bubble';
+            const time = new Date(m.createdAt).toLocaleTimeString();
+            
+            html += `<div class='${rowClass}' data-message-id='${m.id}' data-message-index='${index}'>`;
+            html += `<div class='${bubbleClass}'>`;
+            if (!isSent) {
+              html += `<div class='msg-sender'>${m.senderName}</div>`;
+            }
+            html += `${m.content}`;
+            html += `<div class='msg-meta'>${time}${m.isRead ? ' ✓✓' : ''}</div>`;
+            html += `</div></div>`;
+          });
+        }
+        
+        messagesDiv.innerHTML = html;
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        
+        // Set up auto-read for unread messages
+        setupAutoRead(idx);
+        
+        // Also mark messages as read when user scrolls to view them
+        setupScrollBasedRead(idx);
+      }
+
+      // Set up automatic read status for messages (WhatsApp-style)
+      function setupAutoRead(idx) {
+        const messagesDiv = document.getElementById('messages' + idx);
+        if (!messagesDiv || !state[idx].socket) return;
+
+        // Track which messages are currently being viewed
+        const viewedMessages = new Set();
+        let readTimeout = null;
+
+        // Use Intersection Observer to detect when messages come into view
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const messageIndex = parseInt(entry.target.dataset.messageIndex);
+              const message = state[idx].messages[messageIndex];
+              
+              // If this is an unread message from someone else, add to viewed set
+              if (message && !message.isRead && message.senderId != state[idx].selfId) {
+                viewedMessages.add(message.id);
+              }
+            } else {
+              // Message went out of view, remove from viewed set
+              const messageIndex = parseInt(entry.target.dataset.messageIndex);
+              const message = state[idx].messages[messageIndex];
+              if (message) {
+                viewedMessages.delete(message.id);
+              }
+            }
+          });
+
+          // Clear existing timeout
+          if (readTimeout) {
+            clearTimeout(readTimeout);
+          }
+
+          // Set a delay before marking messages as read (like WhatsApp)
+          readTimeout = setTimeout(() => {
+            if (viewedMessages.size > 0) {
+              let hasUnreadMessages = false;
+              
+              // Mark viewed messages as read
+              state[idx].messages.forEach(message => {
+                if (viewedMessages.has(message.id) && !message.isRead && message.senderId != state[idx].selfId) {
+                  message.isRead = true;
+                  message.readAt = new Date();
+                  hasUnreadMessages = true;
+                }
+              });
+              
+              // If we found unread messages, update the UI and notify server
+              if (hasUnreadMessages) {
+                renderMessages(idx);
+                if (state[idx].sessionId) {
+                  state[idx].socket.emit('markMessagesAsRead', { conversationId: state[idx].sessionId });
+                }
+              }
+              
+              // Clear the viewed messages set
+              viewedMessages.clear();
+            }
+          }, 1000); // 1 second delay like WhatsApp
+        }, {
+          root: messagesDiv,
+          rootMargin: '0px',
+          threshold: 0.8 // Message is considered "seen" when 80% is visible
+        });
+
+        // Observe all message elements
+        messagesDiv.querySelectorAll('[data-message-id]').forEach(msgElement => {
+          observer.observe(msgElement);
+        });
+      }
+
+      // Set up scroll-based read status (additional WhatsApp-style behavior)
+      function setupScrollBasedRead(idx) {
+        const messagesDiv = document.getElementById('messages' + idx);
+        if (!messagesDiv || !state[idx].socket) return;
+
+        let scrollTimeout = null;
+        let lastScrollTop = messagesDiv.scrollTop;
+
+        messagesDiv.addEventListener('scroll', () => {
+          // Clear existing timeout
+          if (scrollTimeout) {
+            clearTimeout(scrollTimeout);
+          }
+
+          // Set a delay to ensure user has stopped scrolling
+          scrollTimeout = setTimeout(() => {
+            const currentScrollTop = messagesDiv.scrollTop;
+            const scrollHeight = messagesDiv.scrollHeight;
+            const clientHeight = messagesDiv.clientHeight;
+            
+            // Check if user scrolled down (viewing newer messages)
+            if (currentScrollTop > lastScrollTop) {
+              // User is scrolling down, check for unread messages in view
+              const visibleMessages = messagesDiv.querySelectorAll('[data-message-id]');
+              let hasUnreadMessages = false;
+              
+              visibleMessages.forEach(msgElement => {
+                const rect = msgElement.getBoundingClientRect();
+                const containerRect = messagesDiv.getBoundingClientRect();
+                
+                // Check if message is visible in the viewport
+                if (rect.top >= containerRect.top && rect.bottom <= containerRect.bottom) {
+                  const messageIndex = parseInt(msgElement.dataset.messageIndex);
+                  const message = state[idx].messages[messageIndex];
+                  
+                  // If this is an unread message from someone else, mark it as read
+                  if (message && !message.isRead && message.senderId != state[idx].selfId) {
+                    message.isRead = true;
+                    message.readAt = new Date();
+                    hasUnreadMessages = true;
+                  }
+                }
+              });
+              
+              // If we found unread messages, update the UI and notify server
+              if (hasUnreadMessages) {
+                renderMessages(idx);
+                if (state[idx].sessionId) {
+                  state[idx].socket.emit('markMessagesAsRead', { conversationId: state[idx].sessionId });
+                }
+              }
+            }
+            
+            lastScrollTop = currentScrollTop;
+          }, 500); // 500ms delay after scrolling stops
+        });
+      }
+
+      // Render typing indicator
+      function renderTypingIndicator(idx) {
+        const typingDiv = document.getElementById('typingIndicator' + idx);
+        if (!typingDiv) return;
+        
+        const typingUsers = Array.from(state[idx].typingUsers);
+        if (typingUsers.length === 0) {
+          typingDiv.innerHTML = '';
+          return;
+        }
+        
+        const userNames = typingUsers.map(userId => {
+          const user = state[idx].contacts.teamLeads.concat(state[idx].contacts.agents || [])
+            .find(u => u.id == userId);
+          return user ? user.name : 'Someone';
+        });
+        
+        const text = typingUsers.length === 1 ? 
+          `${userNames[0]} is typing...` : 
+          `${userNames.slice(0, -1).join(', ')} and ${userNames[userNames.length - 1]} are typing...`;
+        
+        typingDiv.innerHTML = `
+          <div class='typing-indicator'>
+            <span>${text}</span>
+            <div class='typing-dots'>
+              <div class='typing-dot'></div>
+              <div class='typing-dot'></div>
+              <div class='typing-dot'></div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Fetch messages for a panel
+      async function fetchMessages(idx) {
+        if (!state[idx].sessionId) return;
+        
+        try {
+          const res = await fetch(`/api/chat/conversations/${state[idx].sessionId}/messages?page=${state[idx].currentPage}&limit=50`, { 
+            headers: getAuthHeaders(idx) 
+          });
+          const data = await res.json();
+          
+          if (!res.ok) {
+            throw new Error(data.error || 'Failed to fetch messages');
+          }
+          
+          if (state[idx].currentPage === 1) {
+            state[idx].messages = data.messages || [];
+          } else {
+            state[idx].messages = (data.messages || []).concat(state[idx].messages);
+          }
+          
+          state[idx].hasMoreMessages = data.pagination?.hasNextPage || false;
+          renderMessages(idx);
+          
+        } catch (err) {
+          showError(idx, `Failed to fetch messages: ${err.message}`);
+        }
+      }
+
+      // Send message for a panel
+      function sendMsg(idx) {
+        const msgInput = document.getElementById('msg' + idx);
+        const msg = msgInput.value.trim();
+        
+        if (!msg) return;
+        
+        console.log(`[Frontend][Panel ${idx+1}] Attempting to send message:`, {
+          hasSocket: !!state[idx].socket,
+          sessionId: state[idx].sessionId,
+          content: msg,
+          socketConnected: state[idx].isConnected
+        });
+        
+        if (state[idx].socket && state[idx].sessionId) {
+          console.log(`[Socket.IO][Panel ${idx+1}] Sending message:`, { conversationId: state[idx].sessionId, content: msg });
+          state[idx].socket.emit('sendMessage', { 
+            conversationId: state[idx].sessionId, 
+            content: msg 
+          });
+        } else {
+          console.error(`[Frontend][Panel ${idx+1}] Cannot send message - missing socket or sessionId:`, {
+            hasSocket: !!state[idx].socket,
+            sessionId: state[idx].sessionId
+          });
+        }
+        
+        msgInput.value = '';
+        
+        // Stop typing indicator
+        if (state[idx].socket && state[idx].sessionId) {
+          state[idx].socket.emit('typing', { 
+            conversationId: state[idx].sessionId, 
+            isTyping: false 
+          });
+        }
+      }
+
+
+      // End chat for a panel
+      async function endChat(idx) {
+        if (state[idx].socket && state[idx].sessionId) {
+          state[idx].socket.emit('leaveSession', state[idx].sessionId);
+        }
+        
+        clearChat(idx);
+        fetchConversations(idx); // Refresh conversations list
+      }
+
+      // Clear chat area
+      function clearChat(idx) {
+        document.getElementById('chat' + (idx+1)).innerHTML = '';
+        state[idx].sessionId = null;
+        state[idx].selectedUserId = null;
+        state[idx].selectedUserName = null;
+        state[idx].messages = [];
+        state[idx].typingUsers.clear();
+        state[idx].currentPage = 1;
+        state[idx].hasMoreMessages = true;
+      }
+
+      // Show error message
+      function showError(idx, message) {
+        const chatDiv = document.getElementById('chat' + (idx+1));
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error';
+        errorDiv.textContent = message;
+        chatDiv.appendChild(errorDiv);
+        
+        setTimeout(() => {
+          if (errorDiv.parentNode) {
+            errorDiv.parentNode.removeChild(errorDiv);
+          }
+        }, 5000);
+      }
+
+      // Initialize the application
+      document.addEventListener('DOMContentLoaded', function() {
+        console.log('Chat System Test initialized');
+        
+        // Set up keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+          if (e.ctrlKey && e.key === 'Enter') {
+            // Send message in active panel
+            const activeInput = document.activeElement;
+            if (activeInput && activeInput.id.startsWith('msg')) {
+              const panelIdx = parseInt(activeInput.id.replace('msg', '')) - 1;
+              if (panelIdx >= 0 && panelIdx < 2) {
+                sendMsg(panelIdx);
+              }
+            }
+          }
+        });
+        
+        // Periodic refresh via Socket.IO (every 30 seconds)
+        setInterval(() => {
+          state.forEach((panelState, idx) => {
+            if (panelState.token && panelState.isConnected) {
+              panelState.socket.emit('getContacts');
+              panelState.socket.emit('getConversations');
+              panelState.socket.emit('getOnlineStatus');
+            }
+          });
+        }, 30000);
+        
+        // Manual refresh buttons
+        document.getElementById('refreshStatus1').addEventListener('click', () => {
+          if (state[0].token && state[0].isConnected) {
+            state[0].socket.emit('getContacts');
+            state[0].socket.emit('getConversations');
+            state[0].socket.emit('getOnlineStatus');
+          }
+        });
+        
+        document.getElementById('refreshStatus2').addEventListener('click', () => {
+          if (state[1].token && state[1].isConnected) {
+            state[1].socket.emit('getContacts');
+            state[1].socket.emit('getConversations');
+            state[1].socket.emit('getOnlineStatus');
+          }
+        });
+      });
+    </script>
+  </body>
+</html> 

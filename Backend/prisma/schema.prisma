@@ -1,0 +1,503 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id                    Int                     @id @default(autoincrement())
+  name                  String
+  slug                  String                  @unique
+  domain                String                  @unique
+  description           String?
+  logo                  String?
+  website               String?
+  currency              String?
+  language              String?
+  isActive              Boolean                 @default(true)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  createdById           Int?
+  calls                 Call[]
+  chatParticipants      ChatParticipant[]
+  chatSessions          ChatSession[]
+  groupChats            GroupChat[]
+  groupChatMessages     GroupChatMessage[]
+  groupChatParticipants GroupChatParticipant[]
+  leads                 Lead[]
+  leadPackageTypes      LeadPackageType[]
+  leadProviderBeingSold LeadProviderBeingSold[]
+  leadServiceTypes      LeadServiceType[]
+  lookupValues          LookupValue[]
+  messages              Message[]
+  payments              Payment[]
+  securities            Security[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  createdBy             User?                   @relation("createdBy", fields: [createdById], references: [id])
+  rolePermissions       RolePermission[]
+  roles                 Role[]
+  users                 User[]
+
+  @@map("organizations")
+}
+
+model User {
+  id                    Int                    @id @default(autoincrement())
+  email                 String
+  password              String?
+  firstName             String?
+  lastName              String?
+  phoneNumber           String?
+  avatar                String?
+  isActive              Boolean                @default(true)
+  lastLoginAt           DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  organizationId        Int?
+  bio                   String?
+  isOnline              Boolean                @default(false)
+  lastSeen              DateTime               @default(now())
+  onlineStatusUpdatedAt DateTime               @default(now())
+  extension             String?
+  chatParticipants      ChatParticipant[]
+  groupChatsAsAdmin     GroupChat[]            @relation("GroupChatAdmin")
+  groupChatMessages     GroupChatMessage[]     @relation("GroupChatMessageSender")
+  groupChatParticipants GroupChatParticipant[]
+  leadsAssigned         Lead[]                 @relation("LeadAssignedTo")
+  leadsCreated          Lead[]                 @relation("LeadCreatedBy")
+  messages              Message[]              @relation("MessageSender")
+  auditLogs             AuditLog[]
+  notifications         Notification[]         @relation("NotificationRecipient")
+  createdOrganizations  Organization[]         @relation("createdBy")
+  refreshTokens         RefreshToken[]
+  organization          Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roles                 Role[]                 @relation("UserRoles")
+
+  @@unique([email, organizationId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id             Int           @id @default(autoincrement())
+  action         String
+  resource       String
+  resourceId     Int?
+  oldValues      Json?
+  newValues      Json?
+  ipAddress      String?
+  userAgent      String?
+  userRole       String?
+  systemRole     String?
+  createdAt      DateTime      @default(now())
+  userId         Int?
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?         @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Role {
+  id              Int              @id @default(autoincrement())
+  name            String
+  description     String?
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  organizationId  Int
+  isAgent         Boolean          @default(false)
+  agentTeamLeads  Lead[]           @relation("LeadAgentTeam")
+  rolePermissions RolePermission[]
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users           User[]           @relation("UserRoles")
+
+  @@unique([organizationId, name])
+  @@map("roles")
+}
+
+model RolePermission {
+  id             Int                @id @default(autoincrement())
+  action         PermissionAction
+  resource       PermissionResource
+  createdAt      DateTime           @default(now())
+  roleId         Int
+  organizationId Int
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           Role               @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, action, resource])
+  @@map("role_permissions")
+}
+
+model Lead {
+  id                        Int                     @id @default(autoincrement())
+  organizationId            Int
+  createdById               Int
+  assignedToId              Int?
+  firstName                 String
+  lastName                  String
+  email                     String
+  phone                     String                  
+  alternatePhone            String?
+  serviceAddress            String
+  previousAddress           String?
+  shippingAddress           String?
+  cardTypeId                Int?
+  securityPin               String?
+  confirmationNumber        String?                 @unique
+  installationType          String?                 @default("professional")
+  installationDatetime      String?
+  notes                     String?
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  status                    LeadStatus              @default(OPEN)
+  agentTeamId               Int?
+  comment                   String?
+  customerTypeId            Int?
+  externalId                String?
+  agentTeam                 Role?                   @relation("LeadAgentTeam", fields: [agentTeamId], references: [id])
+  assignedTo                User?                   @relation("LeadAssignedTo", fields: [assignedToId], references: [id])
+  cardType                  LookupValue?            @relation("LeadCardType", fields: [cardTypeId], references: [id])
+  createdBy                 User                    @relation("LeadCreatedBy", fields: [createdById], references: [id])
+  organization              Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerType              LookupValue?            @relation("LeadCustomerType", fields: [customerTypeId], references: [id])
+  leadPackageTypes          LeadPackageType[]
+  leadProviderBeingSold     LeadProviderBeingSold[]
+  leadServiceTypes          LeadServiceType[]
+  payments                  Payment[]
+  securities                Security[]
+}
+
+model Payment {
+  id                    Int          @id @default(autoincrement())
+  leadId                Int
+  cardType              String?
+  cardholderName        String?
+  cardNumber            String?
+  expiryDate            String?
+  cvv                   String?
+  billingAddressPayment String?
+  otc                   Decimal?     @db.Decimal(18, 2)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  organizationId        Int
+  lead                  Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model LookupValue {
+  id                     Int                     @id @default(autoincrement())
+  type                   String
+  value                  String
+  displayName            String
+  isActive               Boolean                 @default(true)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  organizationId         Int
+  parentId               Int?
+  leadsAsCardType        Lead[]                  @relation("LeadCardType")
+  leadsAsCustomerType     Lead[]                  @relation("LeadCustomerType")
+  leadPackageTypes       LeadPackageType[]       @relation("LeadPackageTypeRelation")
+  leadProviderBeingSold  LeadProviderBeingSold[] @relation("LeadProviderBeingSoldRelation")
+  leadServiceTypes       LeadServiceType[]       @relation("LeadServiceTypeRelation")
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent                 LookupValue?            @relation("LookupValueHierarchy", fields: [parentId], references: [id])
+  children               LookupValue[]           @relation("LookupValueHierarchy")
+}
+
+model ChatSession {
+  id             BigInt            @id @default(autoincrement())
+  createdAt      DateTime          @default(now())
+  isActive       Boolean           @default(true)
+  organizationId Int
+  lastMessageAt  DateTime?
+  unreadCount    Json?
+  updatedAt      DateTime          @updatedAt
+  participants   ChatParticipant[]
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages       Message[]
+}
+
+model ChatParticipant {
+  id             Int          @id @default(autoincrement())
+  userId         Int
+  chatSessionId  BigInt
+  organizationId Int
+  chatSession    ChatSession  @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chatSessionId])
+}
+
+model Message {
+  id             Int          @id @default(autoincrement())
+  chatSessionId  BigInt
+  senderId       Int
+  content        String
+  createdAt      DateTime     @default(now())
+  organizationId Int
+  isRead         Boolean      @default(false)
+  readAt         DateTime?
+  updatedAt      DateTime     @updatedAt
+  chatSession    ChatSession  @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+model GroupChat {
+  id             BigInt                 @id @default(autoincrement())
+  name           String
+  description    String?
+  organizationId Int
+  adminId        Int
+  isActive       Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  lastMessageAt  DateTime?
+  admin          User                   @relation("GroupChatAdmin", fields: [adminId], references: [id], onDelete: Cascade)
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages       GroupChatMessage[]
+  participants   GroupChatParticipant[]
+}
+
+model GroupChatParticipant {
+  id             Int          @id @default(autoincrement())
+  userId         Int
+  groupChatId    BigInt
+  organizationId Int
+  joinedAt       DateTime     @default(now())
+  isActive       Boolean      @default(true)
+  groupChat      GroupChat    @relation(fields: [groupChatId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupChatId])
+}
+
+model GroupChatMessage {
+  id             Int          @id @default(autoincrement())
+  groupChatId    BigInt
+  senderId       Int
+  content        String
+  createdAt      DateTime     @default(now())
+  organizationId Int
+  isRead         Boolean      @default(false)
+  readAt         DateTime?
+  updatedAt      DateTime     @updatedAt
+  groupChat      GroupChat    @relation(fields: [groupChatId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("GroupChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+model Security {
+  id               Int          @id @default(autoincrement())
+  leadId           Int
+  ssnLastFour      String?
+  stateId          String?
+  dlNumberMasked   String?
+  dateOfBirth      DateTime?
+  dlState          String?
+  dlExpiration     DateTime?
+  securityQuestion String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organizationId   Int
+  lead             Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+
+model LeadServiceType {
+  id             Int          @id @default(autoincrement())
+  leadId         Int
+  serviceTypeId  Int
+  organizationId Int
+  createdAt      DateTime     @default(now())
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  serviceType    LookupValue  @relation("LeadServiceTypeRelation", fields: [serviceTypeId], references: [id])
+
+  @@unique([leadId, serviceTypeId])
+}
+
+model LeadPackageType {
+  id             Int          @id @default(autoincrement())
+  leadId         Int
+  packageTypeId  Int
+  organizationId Int
+  createdAt      DateTime     @default(now())
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packageType    LookupValue  @relation("LeadPackageTypeRelation", fields: [packageTypeId], references: [id])
+
+  @@unique([leadId, packageTypeId])
+}
+
+model LeadProviderBeingSold {
+  id                  Int          @id @default(autoincrement())
+  leadId              Int
+  providerBeingSoldId Int
+  organizationId      Int
+  createdAt           DateTime     @default(now())
+  lead                Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  providerBeingSold   LookupValue  @relation("LeadProviderBeingSoldRelation", fields: [providerBeingSoldId], references: [id])
+
+  @@unique([leadId, providerBeingSoldId])
+}
+
+model Call {
+  id                 Int          @id @default(autoincrement())
+  user               String?
+  vendor_lead_code   String?
+  source_id          String?
+  list_id            String?
+  phone_number       String?
+  security_phrase    String?
+  comments           String?
+  external_lead_id   String?
+  campaign           String?
+  phone_login        String?
+  group              String?
+  SQLdate            DateTime?
+  epoch              BigInt?
+  uniqueid           String?
+  server_ip          String?
+  SIPexten           String?
+  session_id         String?
+  recording_filename String?
+  recording_id       String?
+  entry_date         DateTime?
+  called_count       Int?
+  agent_log_id       String?
+  call_id            String?
+  user_group         String?
+  list_name          String?
+  talk_time          Int?
+  dispo              String?
+  call_notes         String?
+  term_reason        String?
+  callback_datetime  DateTime?
+  organizationId     Int
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id])
+}
+
+model Notification {
+  id             Int              @id @default(autoincrement())
+  type           NotificationType
+  title          String
+  message        String
+  isRead         Boolean          @default(false)
+  isDeleted      Boolean          @default(false)
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  recipientId    Int
+  organizationId Int
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipient      User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum SystemPermissionResource {
+  PLATFORM_USERS
+  PLATFORM_ORGANIZATIONS
+  PLATFORM_SUBSCRIPTIONS
+  PLATFORM_PAYMENTS
+  PLATFORM_ANALYTICS
+  PLATFORM_SETTINGS
+  PLATFORM_AUDIT_LOGS
+  SYSTEM_CONFIGURATION
+}
+
+enum PermissionAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  MANAGE
+  CHAT
+  POST
+}
+
+enum PermissionResource {
+  ORGANIZATION_SETTINGS
+  SYSTEM_PREFERENCES
+  USER_MANAGEMENT
+  USER_ROLES
+  ORGANIZATION_USERS
+  LEAD_FORM
+  FORM_CUSTOMIZATION
+  FIELD_TYPE_CONFIGURATION
+  AGENT_TO_AGENT_CHAT
+  AGENT_TO_TEAM_LEAD_CHAT
+  CALL_HISTORY
+  PROFILE
+  TEAM_LEAD_ALL_CHAT
+  LEAD_FORM_CUSTOMER_INFO
+  LEAD_FORM_ADDRESS
+  LEAD_FORM_SERVICE
+  LEAD_FORM_PAYMENT
+  LEAD_FORM_SECURITY
+  LEAD_FORM_ORDER
+  LEAD_FORM_INSTALLATION
+  LEAD_FORM_FOLLOW_UP
+  LEAD_FORM_WON
+  LEAD_FORM_CLOSE
+  CREATE_GROUP_CHAT
+  SALES_REPORT
+  MANAGEMENT_REPORT
+}
+
+enum LeadStatus {
+  OPEN
+  APPROVED
+  CANCELLED
+  REVISION_REQUESTED
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  READY_FOR_PROCESSING
+  REASSIGNED
+  PROCESSING
+  COMPLETED
+  CLOSED_WON
+  CLOSED_LOST
+  ON_HOLD
+  CALL_LATER
+  CHARGE_BACK
+  PENDING
+}
+
+enum NotificationType {
+  LEAD_ASSIGNED
+  LEAD_UPDATED
+  LEAD_STATUS_CHANGED
+  NEW_MESSAGE
+  MESSAGE_READ
+  SYSTEM_ALERT
+  TASK_ASSIGNED
+  REMINDER
+  NEW_GROUP_MESSAGE
+}

@@ -1,0 +1,144 @@
+{
+  "info": {
+    "name": "Telecom Sales CRM - Chat API",
+    "description": "Complete Chat API endpoints for the Telecom Sales CRM system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "YOUR_ACCESS_TOKEN_HERE",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Get Chat Contacts",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/chat/contacts",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "chat", "contacts"]
+        },
+        "description": "Get all available contacts for chat (team leads and agents)"
+      },
+      "response": []
+    },
+    {
+      "name": "2. Start Chat Session",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetUserId\": 2\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/chat/session",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "chat", "session"]
+        },
+        "description": "Start a new chat session with a target user or reuse existing active session"
+      },
+      "response": []
+    },
+    {
+      "name": "3. Get Chat Messages",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/chat/session/1/messages",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "chat", "session", "1", "messages"]
+        },
+        "description": "Get all messages for a specific chat session"
+      },
+      "response": []
+    },
+    {
+      "name": "4. Send Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"content\": \"Hello! How are you doing today?\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/chat/session/1/message",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "chat", "session", "1", "message"]
+        },
+        "description": "Send a message in a specific chat session"
+      },
+      "response": []
+    },
+    {
+      "name": "5. End Chat Session",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/chat/session/1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "chat", "session", "1"]
+        },
+        "description": "End a specific chat session"
+      },
+      "response": []
+    }
+  ]
+} 
