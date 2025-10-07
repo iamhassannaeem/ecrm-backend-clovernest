@@ -1548,6 +1548,7 @@ exports.updateLead = async (req, res, next) => {
       provider_sold: 'providerBeingSoldIds',
       package_types: 'packageTypeIds',
       card_type: 'cardType',
+      customer_type: 'customerTypeId',
       cardholder_name: 'cardholderName',
       card_number: 'cardNumber',
       expiry_date: 'expiryDate',
@@ -1698,7 +1699,7 @@ exports.updateLead = async (req, res, next) => {
     const validLeadFields = [
       'firstName', 'lastName', 'email', 'phone', 'alternatePhone',
       'serviceAddress', 'previousAddress', 'shippingAddress', 'customerTypeId',
-      'agentTeamId', 'comment', 'cardTypeId', 
+      'agentTeamId', 'comment', 'cardTypeId', 'dateOfBirth',
       'status', 'installationType', 'installationDatetime', 'securityPin', 'assignedToId',
       'externalId', 'serviceTypeIds', 'packageTypeIds', 'providerBeingSoldIds',
       'service_configurations'
