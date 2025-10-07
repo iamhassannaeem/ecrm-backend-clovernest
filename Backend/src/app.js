@@ -37,6 +37,8 @@ const chatRoutes = require('./routes/chat');
 const lookupRoutes = require('./routes/lookup');
 const callsRoutes = require('./routes/calls');
 const notificationRoutes = require('./routes/notifications');
+const attachmentRoutes = require('./routes/attachments');
+
 
 // Initialize Express app
 const app = express();
@@ -193,12 +195,26 @@ app.get('/chat-test', (req, res) => {
 // Global permission middleware - applies to all routes AFTER test routes
 app.use(globalPermissionMiddleware);
 
-// Serve uploaded files with CORS and remove cross-origin headers
+// Serve uploaded files with proper CORS configuration
 app.use('/uploads', (req, res, next) => {
+  // Set proper CORS headers for uploaded files
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Remove problematic headers
   res.removeHeader('cross-origin-resource-policy');
   res.removeHeader('cross-origin-opener-policy');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
   next();
-}, cors(), express.static('uploads'));
+}, express.static('uploads'));
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -215,6 +231,8 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/lookup', lookupRoutes);
 app.use('/api/calls', callsRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/attachments', attachmentRoutes);
+
 
 // Error handling middleware
 app.use(notFound);

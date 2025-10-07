@@ -22,6 +22,10 @@ router.get('/session/:conversationId/messages', authenticateToken, chatControlle
 router.post('/conversations/:conversationId/messages', authenticateToken, chatController.sendMessage);
 router.post('/session/:conversationId/message', authenticateToken, chatController.sendMessage); // Alias for compatibility
 
+// Send a message with attachments in a conversation
+router.post('/conversations/:conversationId/messages/with-attachments', authenticateToken, chatController.sendMessageWithAttachments);
+router.post('/session/:conversationId/message/with-attachments', authenticateToken, chatController.sendMessageWithAttachments); // Alias for compatibility
+
 // Mark messages as read in a conversation
 router.patch('/conversations/:conversationId/read', authenticateToken, chatController.markMessagesAsRead);
 

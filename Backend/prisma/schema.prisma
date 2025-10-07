@@ -37,6 +37,7 @@ model Organization {
   securities            Security[]
   auditLogs             AuditLog[]
   notifications         Notification[]
+  attachments           Attachment[]
   createdBy             User?                   @relation("createdBy", fields: [createdById], references: [id])
   rolePermissions       RolePermission[]
   roles                 Role[]
@@ -72,6 +73,7 @@ model User {
   messages              Message[]              @relation("MessageSender")
   auditLogs             AuditLog[]
   notifications         Notification[]         @relation("NotificationRecipient")
+  attachments           Attachment[]
   createdOrganizations  Organization[]         @relation("createdBy")
   refreshTokens         RefreshToken[]
   organization          Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -255,6 +257,7 @@ model Message {
   isRead         Boolean      @default(false)
   readAt         DateTime?
   updatedAt      DateTime     @updatedAt
+  attachments    Attachment[]
   chatSession    ChatSession  @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -300,6 +303,7 @@ model GroupChatMessage {
   isRead         Boolean      @default(false)
   readAt         DateTime?
   updatedAt      DateTime     @updatedAt
+  attachments    Attachment[]
   groupChat      GroupChat    @relation(fields: [groupChatId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sender         User         @relation("GroupChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -416,6 +420,26 @@ model Notification {
   recipient      User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
 
   @@map("notifications")
+}
+
+model Attachment {
+  id             Int              @id @default(autoincrement())
+  organizationId Int
+  userId         Int
+  messageId      Int?
+  groupMessageId Int?
+  fileName       String
+  filePath       String
+  mimeType       String
+  size           BigInt
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message        Message?         @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  groupMessage   GroupChatMessage? @relation(fields: [groupMessageId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
 }
 
 enum SystemPermissionResource {

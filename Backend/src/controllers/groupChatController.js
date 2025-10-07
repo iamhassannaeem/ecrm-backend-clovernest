@@ -617,6 +617,15 @@ async function getGroupChatMessages(req, res) {
             email: true,
             avatar: true
           }
+        },
+        attachments: {
+          select: {
+            id: true,
+            fileName: true,
+            mimeType: true,
+            size: true,
+            createdAt: true
+          }
         }
       },
       orderBy: {
@@ -631,7 +640,16 @@ async function getGroupChatMessages(req, res) {
 
     res.json({
       success: true,
-      data: serializedMessages.reverse() // Return in chronological order
+      data: serializedMessages.reverse().map(message => ({
+        ...message,
+        attachments: message.attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          mimeType: att.mimeType,
+          size: att.size.toString(),
+          createdAt: att.createdAt
+        }))
+      }))
     });
 
   } catch (error) {
@@ -705,6 +723,15 @@ async function sendGroupChatMessage(req, res) {
             email: true,
             avatar: true
           }
+        },
+        attachments: {
+          select: {
+            id: true,
+            fileName: true,
+            mimeType: true,
+            size: true,
+            createdAt: true
+          }
         }
       }
     });
@@ -720,7 +747,16 @@ async function sendGroupChatMessage(req, res) {
 
     res.status(201).json({
       success: true,
-      data: serializedMessage
+      data: {
+        ...serializedMessage,
+        attachments: serializedMessage.attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          mimeType: att.mimeType,
+          size: att.size.toString(),
+          createdAt: att.createdAt
+        }))
+      }
     });
 
   } catch (error) {

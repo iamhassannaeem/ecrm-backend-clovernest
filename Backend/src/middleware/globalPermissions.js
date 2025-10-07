@@ -109,7 +109,15 @@ const routePermissions = {
   
   // Notifications routes
   '/api/notifications': { action: 'READ', resource: 'NOTIFICATIONS' },
-  '/api/notifications/unread-count': { action: 'READ', resource: 'NOTIFICATIONS' }
+  '/api/notifications/unread-count': { action: 'READ', resource: 'NOTIFICATIONS' },
+
+   // Attachment routes - Use CHAT permission for file uploads
+   '/api/attachments/chat/:conversationId/messages/:messageId/upload': { action: 'CHAT', resource: 'CHAT' },
+   '/api/attachments/chat/:conversationId/upload': { action: 'CHAT', resource: 'CHAT' },
+   '/api/attachments/group/:groupId/messages/:messageId/upload': { action: 'CHAT', resource: 'CHAT' },
+   '/api/attachments/group/:groupId/upload': { action: 'CHAT', resource: 'CHAT' },
+   '/api/attachments/:attachmentId': { action: 'CHAT', resource: 'CHAT' },
+   '/api/attachments/message/:messageId': { action: 'CHAT', resource: 'CHAT' }
 };
 
 
@@ -180,14 +188,15 @@ const globalPermissionMiddleware = (req, res, next) => {
 
   // For routes that need authentication but no specific permissions
   if (req.path === '/api/users/non-agents' ||
-      (req.path.startsWith('/api/users/organizations/') && req.path.endsWith('/non-agents')) ||
-      (req.path.startsWith('/api/organizations/') && req.path.endsWith('/roles/non-agents')) ||
-      req.path.startsWith('/api/chat/') ||
-      req.path.startsWith('/api/leads/orders/') && req.path.endsWith('/final-status') || 
-      req.path.startsWith('/api/leads/phone/') ||
-      req.path.startsWith('/api/notifications')) {  
-    return universalPermissionCheck(req, res, next);
-  }
+    (req.path.startsWith('/api/users/organizations/') && req.path.endsWith('/non-agents')) ||
+    (req.path.startsWith('/api/organizations/') && req.path.endsWith('/roles/non-agents')) ||
+    req.path.startsWith('/api/chat/') ||
+    req.path.startsWith('/api/attachments/') ||
+    req.path.startsWith('/api/leads/orders/') && req.path.endsWith('/final-status') || 
+    req.path.startsWith('/api/leads/phone/') ||
+    req.path.startsWith('/api/notifications')) {  
+  return universalPermissionCheck(req, res, next);
+}
   
  
   universalPermissionCheck(req, res, (err) => {

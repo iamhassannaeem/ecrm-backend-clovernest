@@ -2,6 +2,8 @@ const jwt = require('jsonwebtoken');
 const { prisma } = require('./config/database');
 const { createChatMessageNotification } = require('./controllers/notificationController');
 const { getUserPermissions } = require('./utils/audit');
+const path = require('path');
+const fs = require('fs').promises;
 
 
 function verifyToken(token) {
@@ -76,11 +78,38 @@ const cleanupStaleStatuses = async () => {
 setInterval(cleanupStaleStatuses, 2 * 60 * 1000);
 
 module.exports = function(io) {
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     const token = socket.handshake.auth?.token;
     const userId = verifyToken(token);
     if (!userId) {
       socket.emit('error', 'Authentication failed');
+      socket.disconnect();
+      return;
+    }
+
+    // Validate user exists and is active before allowing connection
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, isActive: true, organizationId: true }
+      });
+
+      if (!user) {
+        console.error(`[Socket.IO] Connection rejected - User not found: userId=${userId}`);
+        socket.emit('error', 'User not found');
+        socket.disconnect();
+        return;
+      }
+
+      if (!user.isActive) {
+        console.error(`[Socket.IO] Connection rejected - User inactive: userId=${userId}`);
+        socket.emit('error', 'User account is inactive');
+        socket.disconnect();
+        return;
+      }
+    } catch (error) {
+      console.error(`[Socket.IO] Error validating user: userId=${userId}`, error);
+      socket.emit('error', 'User validation failed');
       socket.disconnect();
       return;
     }
@@ -96,6 +125,27 @@ module.exports = function(io) {
     
     const updateOnlineStatus = async (isOnline) => {
       try {
+        // First check if user exists
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { id: true, organizationId: true, isActive: true }
+        });
+
+        if (!user) {
+          console.error(`[Socket.IO] User not found: userId=${userId}`);
+          socket.emit('error', 'User not found');
+          socket.disconnect();
+          return;
+        }
+
+        if (!user.isActive) {
+          console.error(`[Socket.IO] User is inactive: userId=${userId}`);
+          socket.emit('error', 'User account is inactive');
+          socket.disconnect();
+          return;
+        }
+
+        // Update user's online status
         await prisma.user.update({
           where: { id: userId },
           data: {
@@ -105,13 +155,8 @@ module.exports = function(io) {
           }
         });
 
-        
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { organizationId: true }
-        });
-
-        if (user?.organizationId) {
+        // Emit status change to organization
+        if (user.organizationId) {
           io.to(`org_${user.organizationId}`).emit('userStatusChanged', {
             userId,
             isOnline,
@@ -217,6 +262,15 @@ module.exports = function(io) {
                 lastName: true,
                 avatar: true
               }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
             }
           }
         });
@@ -254,7 +308,14 @@ module.exports = function(io) {
             content: m.content,
             createdAt: m.createdAt,
             isRead: m.isRead,
-            readAt: m.readAt
+            readAt: m.readAt,
+            attachments: m.attachments.map(att => ({
+              id: att.id,
+              fileName: att.fileName,
+              mimeType: att.mimeType,
+              size: att.size.toString(),
+              createdAt: att.createdAt
+            }))
           })),
           unreadCount: 0 
         });
@@ -381,6 +442,15 @@ module.exports = function(io) {
                 lastName: true,
                 avatar: true
               }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
             }
           }
         });
@@ -418,7 +488,14 @@ module.exports = function(io) {
             content: m.content,
             createdAt: m.createdAt,
             isRead: m.isRead,
-            readAt: m.readAt
+            readAt: m.readAt,
+            attachments: m.attachments.map(att => ({
+              id: att.id,
+              fileName: att.fileName,
+              mimeType: att.mimeType,
+              size: att.size.toString(),
+              createdAt: att.createdAt
+            }))
           })),
           unreadCount: 0 
         });
@@ -481,6 +558,15 @@ module.exports = function(io) {
                 lastName: true,
                 avatar: true
               }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
             }
           }
         });
@@ -504,7 +590,14 @@ module.exports = function(io) {
           content: message.content,
           createdAt: message.createdAt,
           isRead: false,
-          messageType
+          messageType,
+          attachments: message.attachments.map(att => ({
+            id: att.id,
+            fileName: att.fileName,
+            mimeType: att.mimeType,
+            size: att.size.toString(),
+            createdAt: att.createdAt
+          }))
         };
 
         console.log(`[Socket.IO] 📤 BROADCASTING MESSAGE - Broadcasting to conversation ${conversationId}`);
@@ -575,6 +668,426 @@ module.exports = function(io) {
         const errorTime = Date.now() - startTime;
         console.error(`[Socket.IO] ❌ ERROR in sendMessage after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to send message' });
+      }
+    });
+
+    // Handle file attachment upload for one-to-one chat
+    socket.on('uploadAttachment', async ({ conversationId, fileData, fileName, mimeType, size, content = '' }) => {
+      const startTime = Date.now();
+      console.log(`[Socket.IO] 📎 ATTACHMENT UPLOAD - User ${userId} uploading file to conversation ${conversationId}`);
+      console.log(`[Socket.IO] 📎 File: ${fileName} (${mimeType}, ${size} bytes)`);
+      
+      try {
+        if (!conversationId || !fileData || !fileName || !mimeType || !size) {
+          console.log(`[Socket.IO] ❌ VALIDATION FAILED - Missing required attachment data`);
+          socket.emit('error', { message: 'Conversation ID, file data, file name, MIME type, and size are required' });
+          return;
+        }
+
+        // Validate file size (e.g., max 10MB)
+        if (size > 10 * 1024 * 1024) {
+          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File size too large: ${size} bytes`);
+          socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
+          return;
+        }
+
+        // Validate MIME type (basic validation)
+        const allowedMimeTypes = [
+          'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+          'application/pdf', 'text/plain', 'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ];
+        
+        if (!allowedMimeTypes.includes(mimeType)) {
+          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File type not allowed: ${mimeType}`);
+          socket.emit('error', { message: 'File type not allowed' });
+          return;
+        }
+
+        // Verify user has access to this conversation
+        const conversation = await prisma.chatSession.findUnique({
+          where: { id: conversationId },
+          include: { participants: true }
+        });
+
+        if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
+          console.log(`[Socket.IO] ❌ PERMISSION DENIED - User ${userId} not participant in conversation ${conversationId}`);
+          socket.emit('error', { message: 'Not a participant in this conversation' });
+          return;
+        }
+
+        console.log(`[Socket.IO] ✅ PERMISSION VERIFIED - User ${userId} is participant in conversation ${conversationId}`);
+
+        // Create a message first
+        const message = await prisma.message.create({
+          data: {
+            chatSessionId: conversationId.toString(),
+            senderId: userId,
+            content: content || `📎 ${fileName}`,
+            organizationId: conversation.organizationId
+          },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                avatar: true
+              }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
+            }
+          }
+        });
+
+        console.log(`[Socket.IO] 💾 MESSAGE CREATED - Message ID: ${message.id}`);
+
+        // Convert base64 to buffer and save file
+        const fileBuffer = Buffer.from(fileData, 'base64');
+        const fileExtension = path.extname(fileName);
+        const finalFileName = `${Date.now()}_${fileName}`;
+        
+        const finalPath = path.join(
+          'uploads',
+          `org_${conversation.organizationId}`,
+          `user_${userId}`,
+          `chat_${conversationId}`,
+          `message_${message.id}`,
+          finalFileName
+        );
+
+        // Create directory and save file
+        await fs.mkdir(path.dirname(finalPath), { recursive: true });
+        await fs.writeFile(finalPath, fileBuffer);
+
+        // Create attachment record
+        const attachment = await prisma.attachment.create({
+          data: {
+            organizationId: conversation.organizationId,
+            userId: userId,
+            messageId: message.id,
+            fileName: fileName,
+            filePath: finalPath,
+            mimeType: mimeType,
+            size: BigInt(size)
+          }
+        });
+
+        console.log(`[Socket.IO] 💾 ATTACHMENT SAVED - Attachment ID: ${attachment.id}`);
+
+        // Update conversation last message time
+        await prisma.chatSession.update({
+          where: { id: conversationId },
+          data: { 
+            lastMessageAt: new Date(),
+            updatedAt: new Date()
+          }
+        });
+
+        const messageData = {
+          id: message.id,
+          conversationId: conversationId.toString(),
+          senderId: message.senderId,
+          senderName: `${message.sender.firstName} ${message.sender.lastName || ''}`.trim(),
+          content: message.content,
+          createdAt: message.createdAt,
+          isRead: false,
+          messageType: 'attachment',
+          attachments: [{
+            id: attachment.id,
+            fileName: attachment.fileName,
+            mimeType: attachment.mimeType,
+            size: attachment.size.toString(),
+            createdAt: attachment.createdAt
+          }]
+        };
+
+        console.log(`[Socket.IO] 📤 BROADCASTING ATTACHMENT - Broadcasting to conversation ${conversationId}`);
+
+        // Broadcast to all participants in the conversation
+        io.to(`conversation_${conversationId}`).emit('newMessage', messageData);
+        
+        const broadcastTime = Date.now() - startTime;
+        console.log(`[Socket.IO] ✅ ATTACHMENT BROADCASTED - Time: ${broadcastTime}ms`);
+
+        // Send delivery confirmation to sender
+        socket.emit('attachmentDelivered', {
+          messageId: message.id,
+          attachmentId: attachment.id,
+          conversationId: conversationId.toString(),
+          timestamp: new Date()
+        });
+
+        console.log(`[Socket.IO] ✅ DELIVERY CONFIRMATION SENT - To sender ${userId}`);
+
+        // Update unread count
+        await updateUnreadCount(conversationId);
+
+        // Handle notifications for offline users
+        const otherParticipants = conversation.participants.filter(p => p.userId !== userId);
+        
+        for (const participant of otherParticipants) {
+          const isOnline = activeConnections.has(participant.userId);
+          
+          if (!isOnline) {
+            await createChatMessageNotification(
+              userId,
+              participant.userId,
+              conversationId,
+              `📎 ${fileName}`,
+              conversation.organizationId
+            );
+            console.log(`[Socket.IO] 📱 NOTIFICATION CREATED - For offline user ${participant.userId}`);
+          }
+        }
+
+        // Send push notifications to online users not in conversation
+        for (const participant of otherParticipants) {
+          const participantSocket = activeConnections.get(participant.userId);
+          if (participantSocket && !participantSocket.rooms.has(`conversation_${conversationId}`)) {
+            participantSocket.emit('newMessageNotification', {
+              conversationId: conversationId.toString(),
+              senderId: userId,
+              senderName: messageData.senderName,
+              content: `📎 ${fileName}`,
+              timestamp: new Date()
+            });
+            console.log(`[Socket.IO] 🔔 PUSH NOTIFICATION SENT - To online user ${participant.userId}`);
+          }
+        }
+
+        const totalTime = Date.now() - startTime;
+        console.log(`[Socket.IO] ✅ ATTACHMENT PROCESSING COMPLETE - Total time: ${totalTime}ms`);
+
+      } catch (error) {
+        const errorTime = Date.now() - startTime;
+        console.error(`[Socket.IO] ❌ ERROR in uploadAttachment after ${errorTime}ms:`, error);
+        socket.emit('error', { message: 'Failed to upload attachment' });
+      }
+    });
+
+    // Handle file attachment upload for group chat
+    socket.on('uploadGroupAttachment', async ({ groupId, fileData, fileName, mimeType, size, content = '' }) => {
+      const startTime = Date.now();
+      console.log(`[Socket.IO] 📎 GROUP ATTACHMENT UPLOAD - User ${userId} uploading file to group ${groupId}`);
+      console.log(`[Socket.IO] 📎 File: ${fileName} (${mimeType}, ${size} bytes)`);
+      
+      try {
+        if (!groupId || !fileData || !fileName || !mimeType || !size) {
+          console.log(`[Socket.IO] ❌ VALIDATION FAILED - Missing required group attachment data`);
+          socket.emit('error', { message: 'Group ID, file data, file name, MIME type, and size are required' });
+          return;
+        }
+
+        // Validate file size (e.g., max 10MB)
+        if (size > 10 * 1024 * 1024) {
+          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File size too large: ${size} bytes`);
+          socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
+          return;
+        }
+
+        // Validate MIME type (basic validation)
+        const allowedMimeTypes = [
+          'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+          'application/pdf', 'text/plain', 'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ];
+        
+        if (!allowedMimeTypes.includes(mimeType)) {
+          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File type not allowed: ${mimeType}`);
+          socket.emit('error', { message: 'File type not allowed' });
+          return;
+        }
+
+        // Verify user is participant in this group chat
+        const participant = await prisma.groupChatParticipant.findFirst({
+          where: {
+            groupChatId: BigInt(groupId),
+            userId: userId,
+            isActive: true
+          },
+          include: {
+            groupChat: {
+              select: {
+                id: true,
+                organizationId: true,
+                participants: {
+                  where: { isActive: true },
+                  select: { userId: true }
+                }
+              }
+            }
+          }
+        });
+
+        if (!participant || !participant.groupChat) {
+          console.log(`[Socket.IO] ❌ PERMISSION DENIED - User ${userId} not participant in group ${groupId}`);
+          socket.emit('error', { message: 'Not a participant in this group' });
+          return;
+        }
+
+        console.log(`[Socket.IO] ✅ PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
+
+        // Create a message first
+        const message = await prisma.groupChatMessage.create({
+          data: {
+            groupChatId: BigInt(groupId),
+            senderId: userId,
+            content: content || `📎 ${fileName}`,
+            organizationId: participant.groupChat.organizationId
+          },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                avatar: true
+              }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
+            }
+          }
+        });
+
+        console.log(`[Socket.IO] 💾 GROUP MESSAGE CREATED - Message ID: ${message.id}`);
+
+        // Convert base64 to buffer and save file
+        const fileBuffer = Buffer.from(fileData, 'base64');
+        const fileExtension = path.extname(fileName);
+        const finalFileName = `${Date.now()}_${fileName}`;
+        
+        const finalPath = path.join(
+          'uploads',
+          `org_${participant.groupChat.organizationId}`,
+          `user_${userId}`,
+          `group_${groupId}`,
+          `message_${message.id}`,
+          finalFileName
+        );
+
+        // Create directory and save file
+        await fs.mkdir(path.dirname(finalPath), { recursive: true });
+        await fs.writeFile(finalPath, fileBuffer);
+
+        // Create attachment record
+        const attachment = await prisma.attachment.create({
+          data: {
+            organizationId: participant.groupChat.organizationId,
+            userId: userId,
+            groupMessageId: message.id,
+            fileName: fileName,
+            filePath: finalPath,
+            mimeType: mimeType,
+            size: BigInt(size)
+          }
+        });
+
+        console.log(`[Socket.IO] 💾 GROUP ATTACHMENT SAVED - Attachment ID: ${attachment.id}`);
+
+        // Update group chat last message time
+        await prisma.groupChat.update({
+          where: { id: BigInt(groupId) },
+          data: { 
+            lastMessageAt: new Date(),
+            updatedAt: new Date()
+          }
+        });
+
+        const messageData = {
+          id: message.id,
+          groupId: groupId.toString(),
+          senderId: message.senderId,
+          senderName: `${message.sender.firstName} ${message.sender.lastName || ''}`.trim(),
+          content: message.content,
+          createdAt: message.createdAt,
+          messageType: 'attachment',
+          attachments: [{
+            id: attachment.id,
+            fileName: attachment.fileName,
+            mimeType: attachment.mimeType,
+            size: attachment.size.toString(),
+            createdAt: attachment.createdAt
+          }]
+        };
+
+        console.log(`[Socket.IO] 📤 BROADCASTING GROUP ATTACHMENT - Broadcasting to group ${groupId}`);
+
+        // Broadcast to all participants in the group
+        io.to(`group_${groupId}`).emit('newGroupMessage', messageData);
+        
+        const broadcastTime = Date.now() - startTime;
+        console.log(`[Socket.IO] ✅ GROUP ATTACHMENT BROADCASTED - Time: ${broadcastTime}ms`);
+
+        // Send delivery confirmation to sender
+        socket.emit('groupAttachmentDelivered', {
+          messageId: message.id,
+          attachmentId: attachment.id,
+          groupId: groupId.toString(),
+          timestamp: new Date()
+        });
+
+        console.log(`[Socket.IO] ✅ GROUP DELIVERY CONFIRMATION SENT - To sender ${userId}`);
+
+        // Handle notifications for offline users
+        const otherParticipants = participant.groupChat.participants.filter(p => p.userId !== userId);
+        
+        for (const otherParticipant of otherParticipants) {
+          const isOnline = activeConnections.has(otherParticipant.userId);
+          
+          if (!isOnline) {
+            await createChatMessageNotification(
+              userId,
+              otherParticipant.userId,
+              groupId,
+              `📎 ${fileName}`,
+              participant.groupChat.organizationId,
+              'GROUP_CHAT'
+            );
+            console.log(`[Socket.IO] 📱 GROUP NOTIFICATION CREATED - For offline user ${otherParticipant.userId}`);
+          }
+        }
+
+        // Send push notifications to online users not in group
+        for (const otherParticipant of otherParticipants) {
+          const participantSocket = activeConnections.get(otherParticipant.userId);
+          if (participantSocket && !participantSocket.rooms.has(`group_${groupId}`)) {
+            participantSocket.emit('newGroupMessageNotification', {
+              groupId: groupId.toString(),
+              senderId: userId,
+              senderName: messageData.senderName,
+              content: `📎 ${fileName}`,
+              timestamp: new Date()
+            });
+            console.log(`[Socket.IO] 🔔 GROUP PUSH NOTIFICATION SENT - To online user ${otherParticipant.userId}`);
+          }
+        }
+
+        const totalTime = Date.now() - startTime;
+        console.log(`[Socket.IO] ✅ GROUP ATTACHMENT PROCESSING COMPLETE - Total time: ${totalTime}ms`);
+
+      } catch (error) {
+        const errorTime = Date.now() - startTime;
+        console.error(`[Socket.IO] ❌ ERROR in uploadGroupAttachment after ${errorTime}ms:`, error);
+        socket.emit('error', { message: 'Failed to upload group attachment' });
       }
     });
 
@@ -809,6 +1322,15 @@ module.exports = function(io) {
                 lastName: true,
                 avatar: true
               }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
             }
           }
         });
@@ -834,7 +1356,14 @@ module.exports = function(io) {
             senderId: m.senderId,
             senderName: `${m.sender.firstName} ${m.sender.lastName || ''}`.trim(),
             content: m.content,
-            createdAt: m.createdAt
+            createdAt: m.createdAt,
+            attachments: m.attachments.map(att => ({
+              id: att.id,
+              fileName: att.fileName,
+              mimeType: att.mimeType,
+              size: att.size.toString(),
+              createdAt: att.createdAt
+            }))
           }))
         });
 
@@ -904,6 +1433,15 @@ module.exports = function(io) {
                 lastName: true,
                 avatar: true
               }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
             }
           }
         });
@@ -926,7 +1464,14 @@ module.exports = function(io) {
           senderName: `${message.sender.firstName} ${message.sender.lastName || ''}`.trim(),
           content: message.content,
           createdAt: message.createdAt,
-          messageType
+          messageType,
+          attachments: message.attachments.map(att => ({
+            id: att.id,
+            fileName: att.fileName,
+            mimeType: att.mimeType,
+            size: att.size.toString(),
+            createdAt: att.createdAt
+          }))
         };
 
         console.log(`[Socket.IO] 📤 BROADCASTING GROUP MESSAGE - Broadcasting to group ${groupId}`);
@@ -1330,6 +1875,15 @@ module.exports = function(io) {
                 lastName: true,
                 avatar: true
               }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
             }
           }
         });
@@ -1345,7 +1899,14 @@ module.exports = function(io) {
             content: m.content,
             createdAt: m.createdAt,
             isRead: m.isRead,
-            readAt: m.readAt
+            readAt: m.readAt,
+            attachments: m.attachments.map(att => ({
+              id: att.id,
+              fileName: att.fileName,
+              mimeType: att.mimeType,
+              size: att.size.toString(),
+              createdAt: att.createdAt
+            }))
           })),
           hasMore,
           page

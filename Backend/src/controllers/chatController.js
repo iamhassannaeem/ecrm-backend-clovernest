@@ -331,6 +331,15 @@ async function getMessages(req, res) {
               lastName: true,
               avatar: true
             }
+          },
+          attachments: {
+            select: {
+              id: true,
+              fileName: true,
+              mimeType: true,
+              size: true,
+              createdAt: true
+            }
           }
         }
       }),
@@ -342,14 +351,21 @@ async function getMessages(req, res) {
     const totalPages = Math.ceil(totalCount / limit);
     
     res.json({
-      messages: messages.reverse().map(m => ({
+      messages: messages.map(m => ({
         id: m.id,
         senderId: m.senderId,
         senderName: `${m.sender.firstName} ${m.sender.lastName || ''}`.trim(),
         content: m.content,
         createdAt: m.createdAt,
         isRead: m.isRead,
-        readAt: m.readAt
+        readAt: m.readAt,
+        attachments: m.attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          mimeType: att.mimeType,
+          size: att.size.toString(),
+          createdAt: att.createdAt
+        }))
       })),
       pagination: {
         currentPage: parseInt(page),
@@ -373,10 +389,10 @@ async function sendMessage(req, res) {
   try {
     const userId = req.user.id;
     const { conversationId } = req.params;
-    const { content } = req.body;
+    const { content, attachments = [] } = req.body;
     
-    if (!content) {
-      return res.status(400).json({ error: 'Message content required' });
+    if (!content && (!attachments || attachments.length === 0)) {
+      return res.status(400).json({ error: 'Message content or attachments required' });
     }
     
     const conversation = await prisma.chatSession.findUnique({
@@ -399,7 +415,7 @@ async function sendMessage(req, res) {
       data: {
         chatSessionId: conversationId.toString(),
         senderId: userId,
-        content,
+        content: content || (attachments.length > 0 ? `📎 ${attachments.length} file(s)` : ''),
         organizationId: conversation.organizationId
       },
       include: {
@@ -410,10 +426,90 @@ async function sendMessage(req, res) {
             lastName: true,
             avatar: true
           }
+        },
+        attachments: {
+          select: {
+            id: true,
+            fileName: true,
+            mimeType: true,
+            size: true,
+            createdAt: true
+          }
         }
       }
     });
 
+    // Handle attachments if provided
+    if (attachments && attachments.length > 0) {
+      const path = require('path');
+      const fs = require('fs').promises;
+      
+      for (const attachment of attachments) {
+        if (attachment.fileData && attachment.fileName && attachment.mimeType && attachment.size) {
+          try {
+            // Convert base64 to buffer and save file
+            const fileBuffer = Buffer.from(attachment.fileData, 'base64');
+            const fileExtension = path.extname(attachment.fileName);
+            const finalFileName = `${Date.now()}_${attachment.fileName}`;
+            
+            const finalPath = path.join(
+              'uploads',
+              `org_${conversation.organizationId}`,
+              `user_${userId}`,
+              `chat_${conversationId}`,
+              `message_${message.id}`,
+              finalFileName
+            );
+
+            // Create directory and save file
+            await fs.mkdir(path.dirname(finalPath), { recursive: true });
+            await fs.writeFile(finalPath, fileBuffer);
+
+            // Create attachment record
+            await prisma.attachment.create({
+              data: {
+                organizationId: conversation.organizationId,
+                userId: userId,
+                messageId: message.id,
+                fileName: attachment.fileName,
+                filePath: finalPath,
+                mimeType: attachment.mimeType,
+                size: BigInt(attachment.size)
+              }
+            });
+          } catch (attachmentError) {
+            console.error('Error saving attachment:', attachmentError);
+            // Continue with message even if attachment fails
+          }
+        }
+      }
+      
+      // Reload message with attachments
+      const updatedMessage = await prisma.message.findUnique({
+        where: { id: message.id },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              avatar: true
+            }
+          },
+          attachments: {
+            select: {
+              id: true,
+              fileName: true,
+              mimeType: true,
+              size: true,
+              createdAt: true
+            }
+          }
+        }
+      });
+      
+      message.attachments = updatedMessage.attachments;
+    }
   
     await prisma.chatSession.update({
       where: { id: conversationId },
@@ -430,7 +526,7 @@ async function sendMessage(req, res) {
         userId,
         participant.userId,
         conversationId,
-        content,
+        content || (attachments.length > 0 ? `📎 ${attachments.length} file(s)` : ''),
         conversation.organizationId
       );
     }
@@ -444,7 +540,15 @@ async function sendMessage(req, res) {
         senderName: `${message.sender.firstName} ${message.sender.lastName || ''}`.trim(),
         content: message.content,
         createdAt: message.createdAt,
-        isRead: false
+        isRead: false,
+        messageType: attachments.length > 0 ? 'attachment' : 'text',
+        attachments: message.attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          mimeType: att.mimeType,
+          size: att.size.toString(),
+          createdAt: att.createdAt
+        }))
       }
     });
   } catch (error) {
@@ -555,6 +659,15 @@ async function getUserConversations(req, res) {
                 firstName: true,
                 lastName: true
               }
+            },
+            attachments: {
+              select: {
+                id: true,
+                fileName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true
+              }
             }
           }
         }
@@ -582,7 +695,14 @@ async function getUserConversations(req, res) {
           senderId: lastMessage.senderId,
           senderName: `${lastMessage.sender.firstName} ${lastMessage.sender.lastName || ''}`.trim(),
           createdAt: lastMessage.createdAt,
-          isRead: lastMessage.isRead
+          isRead: lastMessage.isRead,
+          attachments: lastMessage.attachments.map(att => ({
+            id: att.id,
+            fileName: att.fileName,
+            mimeType: att.mimeType,
+            size: att.size.toString(),
+            createdAt: att.createdAt
+          }))
         } : null,
         lastMessageAt: conv.lastMessageAt,
         createdAt: conv.createdAt,
@@ -696,11 +816,222 @@ async function getUserOnlineStatus(req, res) {
   }
 }
 
+// Send a message with attachments via REST API
+async function sendMessageWithAttachments(req, res) {
+  try {
+    const userId = req.user.id;
+    const { conversationId } = req.params;
+    const { content, attachments = [] } = req.body;
+    
+    if (!content && (!attachments || attachments.length === 0)) {
+      return res.status(400).json({ error: 'Message content or attachments required' });
+    }
+    
+    const conversation = await prisma.chatSession.findUnique({
+      where: { id: conversationId },
+      include: { participants: true }
+    });
+    
+    if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
+      return res.status(403).json({ error: 'Not a participant in this conversation' });
+    }
+    
+    if (!conversation.isActive) {
+      return res.status(410).json({ 
+        error: 'Conversation is not active',
+        code: 'CONVERSATION_INACTIVE'
+      });
+    }
+    
+    // Validate attachments
+    if (attachments && attachments.length > 0) {
+      for (const attachment of attachments) {
+        if (!attachment.fileData || !attachment.fileName || !attachment.mimeType || !attachment.size) {
+          return res.status(400).json({ 
+            error: 'Each attachment must have fileData, fileName, mimeType, and size' 
+          });
+        }
+        
+        // Validate file size (e.g., max 10MB)
+        if (attachment.size > 10 * 1024 * 1024) {
+          return res.status(400).json({ 
+            error: 'File size too large. Maximum size is 10MB' 
+          });
+        }
+        
+        // Validate MIME type (basic validation)
+        const allowedMimeTypes = [
+          'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+          'application/pdf', 'text/plain', 'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ];
+        
+        if (!allowedMimeTypes.includes(attachment.mimeType)) {
+          return res.status(400).json({ 
+            error: 'File type not allowed' 
+          });
+        }
+      }
+    }
+    
+    const message = await prisma.message.create({
+      data: {
+        chatSessionId: conversationId.toString(),
+        senderId: userId,
+        content: content || (attachments.length > 0 ? `📎 ${attachments.length} file(s)` : ''),
+        organizationId: conversation.organizationId
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            avatar: true
+          }
+        },
+        attachments: {
+          select: {
+            id: true,
+            fileName: true,
+            mimeType: true,
+            size: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+
+    // Handle attachments if provided
+    if (attachments && attachments.length > 0) {
+      const path = require('path');
+      const fs = require('fs').promises;
+      
+      for (const attachment of attachments) {
+        try {
+          // Convert base64 to buffer and save file
+          const fileBuffer = Buffer.from(attachment.fileData, 'base64');
+          const fileExtension = path.extname(attachment.fileName);
+          const finalFileName = `${Date.now()}_${attachment.fileName}`;
+          
+          const finalPath = path.join(
+            'uploads',
+            `org_${conversation.organizationId}`,
+            `user_${userId}`,
+            `chat_${conversationId}`,
+            `message_${message.id}`,
+            finalFileName
+          );
+
+          // Create directory and save file
+          await fs.mkdir(path.dirname(finalPath), { recursive: true });
+          await fs.writeFile(finalPath, fileBuffer);
+
+          // Create attachment record
+          await prisma.attachment.create({
+            data: {
+              organizationId: conversation.organizationId,
+              userId: userId,
+              messageId: message.id,
+              fileName: attachment.fileName,
+              filePath: finalPath,
+              mimeType: attachment.mimeType,
+              size: BigInt(attachment.size)
+            }
+          });
+        } catch (attachmentError) {
+          console.error('Error saving attachment:', attachmentError);
+          return res.status(500).json({ 
+            success: false, 
+            error: 'Failed to save attachment' 
+          });
+        }
+      }
+      
+      // Reload message with attachments
+      const updatedMessage = await prisma.message.findUnique({
+        where: { id: message.id },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              avatar: true
+            }
+          },
+          attachments: {
+            select: {
+              id: true,
+              fileName: true,
+              mimeType: true,
+              size: true,
+              createdAt: true
+            }
+          }
+        }
+      });
+      
+      message.attachments = updatedMessage.attachments;
+    }
+  
+    await prisma.chatSession.update({
+      where: { id: conversationId },
+      data: { 
+        lastMessageAt: new Date(),
+        updatedAt: new Date()
+      }
+    });
+    
+    // Create notifications for offline participants
+    const otherParticipants = conversation.participants.filter(p => p.userId !== userId);
+    for (const participant of otherParticipants) {
+      await createChatMessageNotification(
+        userId,
+        participant.userId,
+        conversationId,
+        content || (attachments.length > 0 ? `📎 ${attachments.length} file(s)` : ''),
+        conversation.organizationId
+      );
+    }
+    
+    res.json({ 
+      success: true, 
+      message: {
+        id: message.id,
+        conversationId: conversationId.toString(), 
+        senderId: message.senderId,
+        senderName: `${message.sender.firstName} ${message.sender.lastName || ''}`.trim(),
+        content: message.content,
+        createdAt: message.createdAt,
+        isRead: false,
+        messageType: attachments.length > 0 ? 'attachment' : 'text',
+        attachments: message.attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          mimeType: att.mimeType,
+          size: att.size.toString(),
+          createdAt: att.createdAt
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error in sendMessageWithAttachments:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+}
+
 module.exports = {
   getContacts,
   getOrCreateConversation,
   getMessages,
   sendMessage,
+  sendMessageWithAttachments,
   markMessagesAsRead,
   getUserConversations,
   getOnlineStatus,
