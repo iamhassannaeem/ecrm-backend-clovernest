@@ -2,12 +2,33 @@ const { prisma } = require('../config/database');
 
 class NotificationService {
   // Create a notification for a new chat message
-  static async createChatNotification(senderId, recipientId, conversationId, messageContent, organizationId) {
+  static async createChatNotification(senderId, recipientId, conversationId, messageContent, organizationId, attachmentInfo = null) {
     try {
       const sender = await prisma.user.findUnique({
         where: { id: senderId },
         select: { firstName: true, lastName: true }
       });
+
+      // Build metadata object
+      const metadata = {
+        senderId,
+        conversationId: conversationId.toString(), // Convert BigInt to string
+        messagePreview: messageContent.substring(0, 50)
+      };
+
+      // Add attachment information if present
+      if (attachmentInfo) {
+        metadata.hasAttachment = true;
+        metadata.attachment = {
+          id: attachmentInfo.id,
+          fileName: attachmentInfo.fileName,
+          mimeType: attachmentInfo.mimeType,
+          size: attachmentInfo.size.toString(), // Convert BigInt to string
+          fileType: attachmentInfo.mimeType.split('/')[0] // e.g., 'image', 'application', 'text'
+        };
+      } else {
+        metadata.hasAttachment = false;
+      }
 
       const notification = await prisma.notification.create({
         data: {
@@ -16,11 +37,7 @@ class NotificationService {
           message: messageContent.length > 100 ? messageContent.substring(0, 100) + '...' : messageContent,
           recipientId,
           organizationId,
-          metadata: {
-            senderId,
-            conversationId: conversationId.toString(), // Convert BigInt to string
-            messagePreview: messageContent.substring(0, 50)
-          }
+          metadata: metadata
         }
       });
 
@@ -32,7 +49,7 @@ class NotificationService {
   }
 
   // Create a notification for a new group chat message
-  static async createGroupChatNotification(senderId, recipientId, groupId, messageContent, organizationId) {
+  static async createGroupChatNotification(senderId, recipientId, groupId, messageContent, organizationId, attachmentInfo = null) {
     try {
       const sender = await prisma.user.findUnique({
         where: { id: senderId },
@@ -44,6 +61,28 @@ class NotificationService {
         select: { name: true }
       });
 
+      // Build metadata object
+      const metadata = {
+        senderId,
+        groupId: groupId.toString(),
+        messagePreview: messageContent.substring(0, 50),
+        groupName: group.name
+      };
+
+      // Add attachment information if present
+      if (attachmentInfo) {
+        metadata.hasAttachment = true;
+        metadata.attachment = {
+          id: attachmentInfo.id,
+          fileName: attachmentInfo.fileName,
+          mimeType: attachmentInfo.mimeType,
+          size: attachmentInfo.size.toString(), // Convert BigInt to string
+          fileType: attachmentInfo.mimeType.split('/')[0] // e.g., 'image', 'application', 'text'
+        };
+      } else {
+        metadata.hasAttachment = false;
+      }
+
       const notification = await prisma.notification.create({
         data: {
           type: 'NEW_GROUP_MESSAGE',
@@ -51,12 +90,7 @@ class NotificationService {
           message: `${sender.firstName} ${sender.lastName || ''}: ${messageContent.length > 100 ? messageContent.substring(0, 100) + '...' : messageContent}`,
           recipientId,
           organizationId,
-          metadata: {
-            senderId,
-            groupId: groupId.toString(),
-            messagePreview: messageContent.substring(0, 50),
-            groupName: group.name
-          }
+          metadata: metadata
         }
       });
 

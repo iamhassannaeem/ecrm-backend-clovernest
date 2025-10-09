@@ -78,38 +78,11 @@ const cleanupStaleStatuses = async () => {
 setInterval(cleanupStaleStatuses, 2 * 60 * 1000);
 
 module.exports = function(io) {
-  io.on('connection', async (socket) => {
+  io.on('connection', (socket) => {
     const token = socket.handshake.auth?.token;
     const userId = verifyToken(token);
     if (!userId) {
       socket.emit('error', 'Authentication failed');
-      socket.disconnect();
-      return;
-    }
-
-    // Validate user exists and is active before allowing connection
-    try {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, isActive: true, organizationId: true }
-      });
-
-      if (!user) {
-        console.error(`[Socket.IO] Connection rejected - User not found: userId=${userId}`);
-        socket.emit('error', 'User not found');
-        socket.disconnect();
-        return;
-      }
-
-      if (!user.isActive) {
-        console.error(`[Socket.IO] Connection rejected - User inactive: userId=${userId}`);
-        socket.emit('error', 'User account is inactive');
-        socket.disconnect();
-        return;
-      }
-    } catch (error) {
-      console.error(`[Socket.IO] Error validating user: userId=${userId}`, error);
-      socket.emit('error', 'User validation failed');
       socket.disconnect();
       return;
     }
@@ -125,27 +98,6 @@ module.exports = function(io) {
     
     const updateOnlineStatus = async (isOnline) => {
       try {
-        // First check if user exists
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { id: true, organizationId: true, isActive: true }
-        });
-
-        if (!user) {
-          console.error(`[Socket.IO] User not found: userId=${userId}`);
-          socket.emit('error', 'User not found');
-          socket.disconnect();
-          return;
-        }
-
-        if (!user.isActive) {
-          console.error(`[Socket.IO] User is inactive: userId=${userId}`);
-          socket.emit('error', 'User account is inactive');
-          socket.disconnect();
-          return;
-        }
-
-        // Update user's online status
         await prisma.user.update({
           where: { id: userId },
           data: {
@@ -155,8 +107,13 @@ module.exports = function(io) {
           }
         });
 
-        // Emit status change to organization
-        if (user.organizationId) {
+        
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { organizationId: true }
+        });
+
+        if (user?.organizationId) {
           io.to(`org_${user.organizationId}`).emit('userStatusChanged', {
             userId,
             isOnline,
@@ -839,14 +796,22 @@ module.exports = function(io) {
           const isOnline = activeConnections.has(participant.userId);
           
           if (!isOnline) {
+            // Pass attachment information to notification
             await createChatMessageNotification(
               userId,
               participant.userId,
               conversationId,
               `📎 ${fileName}`,
-              conversation.organizationId
+              conversation.organizationId,
+              'DIRECT',
+              {
+                id: attachment.id,
+                fileName: attachment.fileName,
+                mimeType: attachment.mimeType,
+                size: attachment.size
+              }
             );
-            console.log(`[Socket.IO] 📱 NOTIFICATION CREATED - For offline user ${participant.userId}`);
+            console.log(`[Socket.IO] 📱 NOTIFICATION CREATED - For offline user ${participant.userId} with attachment info`);
           }
         }
 
@@ -1054,15 +1019,22 @@ module.exports = function(io) {
           const isOnline = activeConnections.has(otherParticipant.userId);
           
           if (!isOnline) {
+            // Pass attachment information to notification
             await createChatMessageNotification(
               userId,
               otherParticipant.userId,
               groupId,
               `📎 ${fileName}`,
               participant.groupChat.organizationId,
-              'GROUP_CHAT'
+              'GROUP_CHAT',
+              {
+                id: attachment.id,
+                fileName: attachment.fileName,
+                mimeType: attachment.mimeType,
+                size: attachment.size
+              }
             );
-            console.log(`[Socket.IO] 📱 GROUP NOTIFICATION CREATED - For offline user ${otherParticipant.userId}`);
+            console.log(`[Socket.IO] 📱 GROUP NOTIFICATION CREATED - For offline user ${otherParticipant.userId} with attachment info`);
           }
         }
 

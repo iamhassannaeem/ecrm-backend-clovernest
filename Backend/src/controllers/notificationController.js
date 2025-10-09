@@ -282,12 +282,12 @@ async function createLeadAssignmentNotification(leadId, assignedToId, assignedBy
   }
 }
 
-async function createChatMessageNotification(senderId, recipientId, conversationId, messageContent, organizationId, chatType = 'DIRECT') {
+async function createChatMessageNotification(senderId, recipientId, conversationId, messageContent, organizationId, chatType = 'DIRECT', attachmentInfo = null) {
   try {
     if (chatType === 'GROUP_CHAT') {
-      return await NotificationService.createGroupChatNotification(senderId, recipientId, conversationId, messageContent, organizationId);
+      return await NotificationService.createGroupChatNotification(senderId, recipientId, conversationId, messageContent, organizationId, attachmentInfo);
     } else {
-      return await NotificationService.createChatNotification(senderId, recipientId, conversationId, messageContent, organizationId);
+      return await NotificationService.createChatNotification(senderId, recipientId, conversationId, messageContent, organizationId, attachmentInfo);
     }
   } catch (error) {
     console.error('Error creating chat message notification:', error);
