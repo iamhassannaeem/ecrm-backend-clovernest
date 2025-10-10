@@ -13,23 +13,120 @@ function maskCardNumber(cardNumber) {
   return first6 + middle + last4;
 }
 
-// Function to generate unique confirmation number
+// Function to generate unique confirmation number in series (A00001 to Z99999)
 async function generateConfirmationNumber(organizationId) {
-  const timestamp = Date.now().toString();
-  const randomSuffix = Math.random().toString(36).substr(2, 4).toUpperCase();
-  const confirmationNumber = `CFM${timestamp.slice(-6)}${randomSuffix}`;
+  // Find all confirmation numbers for this organization that match our format (Letter + 5 digits)
+  const allLeads = await prisma.lead.findMany({
+    where: { 
+      organizationId,
+      confirmationNumber: { not: null }
+    },
+    select: {
+      confirmationNumber: true
+    }
+  });
   
+  // Filter to only include valid format (1-2 letters followed by exactly 5 digits)
+  const validConfirmationNumbers = allLeads
+    .map(lead => lead.confirmationNumber)
+    .filter(num => /^[A-Z]{1,2}\d{5}$/.test(num));
   
+  let newConfirmationNumber;
+  
+  if (validConfirmationNumbers.length === 0) {
+    // Start with A00001 if no previous confirmation number exists
+    newConfirmationNumber = 'A00001';
+  } else {
+    // Parse and find the highest confirmation number
+    let maxValue = 0;
+    let maxConfirmationNumber = '';
+    
+    for (const confNum of validConfirmationNumbers) {
+      // Calculate numeric value for sorting
+      let value = 0;
+      
+      if (confNum.length === 6) {
+        // Single letter format (A00001)
+        const letter = confNum.charAt(0);
+        const number = parseInt(confNum.substring(1));
+        value = (letter.charCodeAt(0) - 65) * 100000 + number; // 'A' is 65
+      } else if (confNum.length === 7) {
+        // Double letter format (AA00001)
+        const firstLetter = confNum.charAt(0);
+        const secondLetter = confNum.charAt(1);
+        const number = parseInt(confNum.substring(2));
+        value = ((firstLetter.charCodeAt(0) - 65) * 26 + (secondLetter.charCodeAt(0) - 65) + 26) * 100000 + number;
+      }
+      
+      if (value > maxValue) {
+        maxValue = value;
+        maxConfirmationNumber = confNum;
+      }
+    }
+    
+    const lastNumber = maxConfirmationNumber;
+    
+    // Extract letter and number parts
+    if (lastNumber.length === 6) {
+      // Single letter format (A00001)
+      const letter = lastNumber.charAt(0);
+      const number = parseInt(lastNumber.substring(1));
+      
+      if (number < 99999) {
+        // Increment the number
+        const nextNumber = (number + 1).toString().padStart(5, '0');
+        newConfirmationNumber = letter + nextNumber;
+      } else {
+        // Roll over to next letter
+        const nextLetterCode = letter.charCodeAt(0) + 1;
+        
+        if (nextLetterCode > 90) { // 'Z' is 90
+          // Move to double letter format
+          newConfirmationNumber = 'AA00001';
+        } else {
+          // Move to next letter with 00001
+          newConfirmationNumber = String.fromCharCode(nextLetterCode) + '00001';
+        }
+      }
+    } else {
+      // Double letter format (AA00001)
+      const firstLetter = lastNumber.charAt(0);
+      const secondLetter = lastNumber.charAt(1);
+      const number = parseInt(lastNumber.substring(2));
+      
+      if (number < 99999) {
+        // Increment the number
+        const nextNumber = (number + 1).toString().padStart(5, '0');
+        newConfirmationNumber = firstLetter + secondLetter + nextNumber;
+      } else {
+        // Roll over letters
+        if (secondLetter === 'Z') {
+          // Roll over both letters (AZ -> BA)
+          const nextFirstLetter = String.fromCharCode(firstLetter.charCodeAt(0) + 1);
+          newConfirmationNumber = nextFirstLetter + 'A00001';
+        } else {
+          // Increment second letter
+          const nextSecondLetter = String.fromCharCode(secondLetter.charCodeAt(0) + 1);
+          newConfirmationNumber = firstLetter + nextSecondLetter + '00001';
+        }
+      }
+    }
+  }
+  
+  // Double-check uniqueness (in case of race conditions)
   const existingLead = await prisma.lead.findFirst({
-    where: { confirmationNumber }
+    where: { 
+      confirmationNumber: newConfirmationNumber,
+      organizationId
+    }
   });
   
   if (existingLead) {
-    
+    // Recursively generate next number if conflict exists
     return await generateConfirmationNumber(organizationId);
   }
   
-  return confirmationNumber;
+  return newConfirmationNumber;
 }
 
 
@@ -833,6 +930,12 @@ exports.postLead = async (req, res, next) => {
         data.updatedById = req.user.id;
       }
       data.status = 'COMPLETED';
+      
+      // Generate confirmation number if not already present
+      if (!lead.confirmationNumber) {
+        data.confirmationNumber = await generateConfirmationNumber(req.user.organizationId);
+      }
+      
       const result = await prisma.$transaction(async (tx) => {
         // Filter out fields that shouldn't be passed to lead.update()
         const leadUpdateData = { ...data };
@@ -1756,6 +1859,18 @@ exports.updateLead = async (req, res, next) => {
       }
     }
 
+    // Generate confirmation number if status is being set to COMPLETED and doesn't have one
+    if (data.status === 'COMPLETED') {
+      const currentLead = await prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { confirmationNumber: true }
+      });
+      
+      if (!currentLead.confirmationNumber) {
+        data.confirmationNumber = await generateConfirmationNumber(req.user.organizationId);
+      }
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       // Filter out fields that shouldn't be passed to lead.update()
       const leadUpdateData = { ...data };
@@ -2627,6 +2742,18 @@ exports.getServiceTypesWithPackages = async (req, res, next) => {
         isActive: true
       },
       include: {
+        parent: {
+          where: {
+            organizationId: organizationId,
+            isActive: true
+          },
+          select: {
+            id: true,
+            type: true,
+            value: true,
+            displayName: true
+          }
+        },
         children: {
           where: {
             type: {
@@ -2674,6 +2801,7 @@ exports.getSalesReport = async (req, res, next) => {
         { lastName: { contains: searchTerm, mode: 'insensitive' } },
         { email: { contains: searchTerm, mode: 'insensitive' } },
         { phone: { contains: searchTerm, mode: 'insensitive' } },
+        { confirmationNumber: { contains: searchTerm, mode: 'insensitive' } },
         { alternatePhone: { contains: searchTerm, mode: 'insensitive' } },
         { serviceAddress: { contains: searchTerm, mode: 'insensitive' } },
         { previousAddress: { contains: searchTerm, mode: 'insensitive' } },
@@ -2789,6 +2917,9 @@ exports.getSalesReport = async (req, res, next) => {
               cardType: true,
               cardholderName: true,
               cardNumber: true,
+              expiryDate: true,
+              cvv: true,
+              billingAddressPayment: true,
               otc: true
             }
           },
