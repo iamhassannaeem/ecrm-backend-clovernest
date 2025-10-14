@@ -1083,8 +1083,8 @@ exports.postLead = async (req, res, next) => {
           }
         }
         
-        // When marking as COMPLETED, delete security data and filter payment data
-        if (data.status === 'COMPLETED') {
+        // When marking as COMPLETED or CLOSED_LOST, delete security data and filter payment data
+        if (data.status === 'COMPLETED' || data.status === 'CLOSED_LOST') {
           // Delete all security data
           await tx.security.deleteMany({
             where: { leadId: leadId }
@@ -1816,10 +1816,10 @@ exports.updateLead = async (req, res, next) => {
     }
     data = filteredData;
     const hasPostPermission = await canPostLead(req.user);
-    if (data.status === 'COMPLETED' && !hasPostPermission && !isOrgAdmin && !isSuperAdmin) {
+    if ((data.status === 'COMPLETED' || data.status === 'CLOSED_LOST') && !hasPostPermission && !isOrgAdmin && !isSuperAdmin) {
       return res.status(403).json({
         error: 'Insufficient permissions',
-        message: 'You do not have permission to mark leads as completed. Use the POST endpoint instead.'
+        message: 'You do not have permission to mark leads as completed or closed lost. Use the POST endpoint instead.'
       });
     }
     const dateFields = ['installationDatetime'];
@@ -1859,8 +1859,8 @@ exports.updateLead = async (req, res, next) => {
       }
     }
 
-    // Generate confirmation number if status is being set to COMPLETED and doesn't have one
-    if (data.status === 'COMPLETED') {
+    // Generate confirmation number if status is being set to COMPLETED or CLOSED_LOST and doesn't have one
+    if (data.status === 'COMPLETED' || data.status === 'CLOSED_LOST') {
       const currentLead = await prisma.lead.findUnique({
         where: { id: leadId },
         select: { confirmationNumber: true }
@@ -1955,6 +1955,37 @@ exports.updateLead = async (req, res, next) => {
               leadId: leadId,
               organizationId: req.user.organizationId
             }
+          });
+        }
+      }
+
+      // When marking as COMPLETED or CLOSED_LOST, delete security data and filter payment data
+      if (data.status === 'COMPLETED' || data.status === 'CLOSED_LOST') {
+        // Delete all security data
+        await tx.security.deleteMany({
+          where: { leadId: leadId }
+        });
+
+        // Update payment data to keep only cardholderName, masked cardNumber, and otc
+        const existingPayments = await tx.payment.findMany({
+          where: { leadId: leadId }
+        });
+
+        for (const payment of existingPayments) {
+          const filteredPaymentData = {};
+          if (payment.cardholderName) filteredPaymentData.cardholderName = payment.cardholderName;
+          if (payment.cardNumber) filteredPaymentData.cardNumber = maskCardNumber(payment.cardNumber);
+          if (payment.otc) filteredPaymentData.otc = payment.otc;
+          
+          // Clear sensitive fields
+          filteredPaymentData.cvv = null;
+          filteredPaymentData.expiryDate = null;
+          filteredPaymentData.billingAddressPayment = null;
+          filteredPaymentData.cardType = null;
+
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: filteredPaymentData
           });
         }
       }
