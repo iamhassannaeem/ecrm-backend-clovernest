@@ -104,9 +104,14 @@ exports.register = async (req, res, next) => {
           slug: organization.slug,
           domain: organization.domain,
           description: organization.description,
-          status: organization.status,
+          logo: organization.logo,
+          website: organization.website,
+          currency: organization.currency,
+          language: organization.language,
+          isActive: organization.isActive,
           createdAt: organization.createdAt,
-          updatedAt: organization.updatedAt
+          updatedAt: organization.updatedAt,
+          createdById: organization.createdById
         }
       }
     });
@@ -297,6 +302,16 @@ exports.login = async (req, res, next) => {
           id: org.id,
           name: org.name,
           slug: org.slug,
+          domain: org.domain,
+          description: org.description,
+          logo: org.logo,
+          website: org.website,
+          currency: org.currency,
+          language: org.language,
+          isActive: org.isActive,
+          createdAt: org.createdAt,
+          updatedAt: org.updatedAt,
+          createdById: org.createdById,
           role: 'SUPER_ADMIN'
         })) || [])
       ];
@@ -308,9 +323,14 @@ exports.login = async (req, res, next) => {
           slug: user.organization.slug,
           domain: user.organization.domain,
           description: user.organization.description,
-          status: user.organization.status,
+          logo: user.organization.logo,
+          website: user.organization.website,
+          currency: user.organization.currency,
+          language: user.organization.language,
+          isActive: user.organization.isActive,
           createdAt: user.organization.createdAt,
           updatedAt: user.organization.updatedAt,
+          createdById: user.organization.createdById,
           role: 'ORGANIZATION_ADMIN'
         }];
       } else {
@@ -324,9 +344,14 @@ exports.login = async (req, res, next) => {
           slug: user.organization.slug,
           domain: user.organization.domain,
           description: user.organization.description,
-          status: user.organization.status,
+          logo: user.organization.logo,
+          website: user.organization.website,
+          currency: user.organization.currency,
+          language: user.organization.language,
+          isActive: user.organization.isActive,
           createdAt: user.organization.createdAt,
           updatedAt: user.organization.updatedAt,
+          createdById: user.organization.createdById,
           role: user.roles.length > 0 ? user.roles[0].name : null
         }];
       } else {
@@ -450,15 +475,47 @@ exports.forgotPassword = async (req, res, next) => {
 };
 
 exports.getMe = async (req, res) => {
-  res.json({
-    user: {
-      id: req.user.id,
-      email: req.user.email,
-      firstName: req.user.firstName,
-      lastName: req.user.lastName,
-      avatar: req.user.avatar,
-      emailVerified: req.user.emailVerified,
-      role: req.user.roles.length > 0 ? req.user.roles[0].name : null 
+  try {
+    // Fetch user with organization details
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        organization: true,
+        roles: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
     }
-  });
+
+    let userResponse = {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatar: user.avatar,
+      emailVerified: user.emailVerified,
+      role: user.roles.length > 0 ? user.roles[0].name : null,
+      organization: user.organization ? {
+        id: user.organization.id,
+        name: user.organization.name,
+        slug: user.organization.slug,
+        domain: user.organization.domain,
+        description: user.organization.description,
+        logo: user.organization.logo,
+        website: user.organization.website,
+        currency: user.organization.currency,
+        language: user.organization.language,
+        isActive: user.organization.isActive,
+        createdAt: user.organization.createdAt,
+        updatedAt: user.organization.updatedAt,
+        createdById: user.organization.createdById
+      } : null
+    };
+
+    res.json({ user: userResponse });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
 }; 
