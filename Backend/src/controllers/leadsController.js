@@ -131,10 +131,10 @@ async function generateConfirmationNumber(organizationId) {
 
 
 const stepFieldMap = [
-  { key: 'LEAD_FORM_CUSTOMER_INFO', fields: ['firstName', 'lastName', 'email', 'phone', 'alternatePhone', 'serviceAddress', 'previousAddress'] },
+  { key: 'LEAD_FORM_CUSTOMER_INFO', fields: ['firstName', 'lastName', 'email', 'phone', 'alternatePhone', 'serviceAddress'] },
   { key: 'LEAD_FORM_SERVICE', fields: ['serviceTypeIds', 'customerTypeId', 'agentTeamId', 'comment', 'packageTypeIds', 'providerBeingSoldIds'] },
   { key: 'LEAD_FORM_PAYMENT', fields: ['cardType', 'cardholderName', 'cardNumber', 'expiryDate', 'billingAddressPayment', 'otc'] },
-  { key: 'LEAD_FORM_SECURITY', fields: ['ssnLastFour', 'stateId', 'dlNumberMasked', 'dlState', 'dlExpiration', 'securityQuestion', 'dateOfBirth', 'securityPin'] },
+  { key: 'LEAD_FORM_SECURITY', fields: ['ssnLastFour', 'dlNumberMasked', 'dlState', 'securityQuestion', 'dateOfBirth', 'policyNumber'] },
 ];
 
 
@@ -259,7 +259,6 @@ exports.createLead = async (req, res, next) => {
       last_name: 'lastName',
       alternate_phone: 'alternatePhone',
       service_address: 'serviceAddress',
-      previous_address: 'previousAddress',
       shipping_address: 'shippingAddress',
       service_types: 'serviceTypeIds',
       customer_type: 'customerTypeId',
@@ -274,14 +273,11 @@ exports.createLead = async (req, res, next) => {
       billing_address_payment: 'billingAddressPayment',
       otc: 'otc',
       ssn_last_four: 'ssnLastFour',
-      state_id: 'stateId',
       dl_number_masked: 'dlNumberMasked',
       dl_state: 'dlState',
-      dl_expiration: 'dlExpiration',
       security_question: 'securityQuestion',
-      security_pin: 'securityPin',
-      installation_type: 'installationType',
-      installation_datetime: 'installationDatetime',
+      policy_number: 'policyNumber',
+      date_of_birth: 'dateOfBirth',
       assign_to: 'assignedToId',
       status: 'status',
       external_id: 'externalId',
@@ -319,12 +315,9 @@ exports.createLead = async (req, res, next) => {
 
     const securityFields = [
       'ssnLastFour',
-      'stateId',
       'dlNumberMasked',
       'dlState',
-      'dlExpiration',
-      'securityQuestion',
-      'dateOfBirth'
+      'securityQuestion'
     ];
     const securityData = {};
     for (const field of securityFields) {
@@ -350,9 +343,9 @@ exports.createLead = async (req, res, next) => {
  
     const validLeadFields = [
       'firstName', 'lastName', 'email', 'phone', 'alternatePhone', 'dateOfBirth',
-      'serviceAddress', 'previousAddress', 'shippingAddress', 'customerTypeId',
+      'serviceAddress', 'shippingAddress', 'customerTypeId',
       'agentTeamId', 'comment', 'cardTypeId', 
-      'status', 'installationType', 'installationDatetime', 'securityPin', 'assignedToId',
+      'status', 'policyNumber', 'assignedToId',
       'externalId'
     ];
     
@@ -405,7 +398,7 @@ exports.createLead = async (req, res, next) => {
       }
     }
       
-    const dateFields = ['installationDatetime'];
+    const dateFields = ['dateOfBirth'];
     for (const field of dateFields) {
       if (data[field] && typeof data[field] === 'string' && data[field].trim() !== '') {
         try {
@@ -423,8 +416,7 @@ exports.createLead = async (req, res, next) => {
       }
     }
     const optionalFieldsToClean = [
-      'alternatePhone', 'previousAddress', 'shippingAddress',
-      'installationType'
+      'alternatePhone', 'shippingAddress',
     ];
     
     for (const field of optionalFieldsToClean) {
@@ -554,35 +546,7 @@ exports.createLead = async (req, res, next) => {
       console.log('No payment data to create - paymentData is empty');
     }
     if (Object.keys(securityData).length > 0) {
-      if (securityData.dateOfBirth && typeof securityData.dateOfBirth === 'string' && securityData.dateOfBirth.trim() !== '') {
-        try {
-          const date = new Date(securityData.dateOfBirth);
-          if (!isNaN(date.getTime())) {
-            securityData.dateOfBirth = date.toISOString();
-          } else {
-            delete securityData.dateOfBirth;
-          }
-        } catch (error) {
-          delete securityData.dateOfBirth;
-        }
-      } else if (securityData.dateOfBirth === '' || securityData.dateOfBirth === null || securityData.dateOfBirth === undefined) {
-        delete securityData.dateOfBirth;
-      }
       
-      if (securityData.dlExpiration && typeof securityData.dlExpiration === 'string' && securityData.dlExpiration.trim() !== '') {
-        try {
-          const date = new Date(securityData.dlExpiration);
-          if (!isNaN(date.getTime())) {
-            securityData.dlExpiration = date.toISOString();
-          } else {
-            delete securityData.dlExpiration;
-          }
-        } catch (error) {
-          delete securityData.dlExpiration;
-        }
-      } else if (securityData.dlExpiration === '' || securityData.dlExpiration === null || securityData.dlExpiration === undefined) {
-        delete securityData.dlExpiration;
-      }
       
       await prisma.security.create({
         data: {
@@ -723,7 +687,6 @@ exports.postLead = async (req, res, next) => {
         last_name: 'lastName',
         alternate_phone: 'alternatePhone',
         service_address: 'serviceAddress',
-        previous_address: 'previousAddress',
         shipping_address: 'shippingAddress',
         service_types: 'serviceTypeIds',
         customer_type: 'customerTypeId',
@@ -737,14 +700,9 @@ exports.postLead = async (req, res, next) => {
         billing_address_payment: 'billingAddressPayment',
         otc: 'otc',
         ssn_last_four: 'ssnLastFour',
-        state_id: 'stateId',
         dl_number_masked: 'dlNumberMasked',
         dl_state: 'dlState',
-        dl_expiration: 'dlExpiration',
         security_question: 'securityQuestion',
-        security_pin: 'securityPin',
-        installation_type: 'installationType',
-        installation_datetime: 'installationDatetime',
         assign_to: 'assignedToId',
         status: 'status',
         external_id: 'externalId',
@@ -834,10 +792,8 @@ exports.postLead = async (req, res, next) => {
       }
       const securityFields = [
         'ssnLastFour',
-        'stateId',
         'dlNumberMasked',
         'dlState',
-        'dlExpiration',
         'securityQuestion',
         'dateOfBirth'
       ];
@@ -849,20 +805,6 @@ exports.postLead = async (req, res, next) => {
         } else if (typeof data[field] !== 'undefined') {
           delete data[field];
         }
-      }
-      if (securityData.dlExpiration && typeof securityData.dlExpiration === 'string' && securityData.dlExpiration.trim() !== '') {
-        try {
-          const date = new Date(securityData.dlExpiration);
-          if (!isNaN(date.getTime())) {
-            securityData.dlExpiration = date.toISOString();
-          } else {
-            delete securityData.dlExpiration;
-          }
-        } catch (error) {
-          delete securityData.dlExpiration;
-        }
-      } else if (securityData.dlExpiration === '' || securityData.dlExpiration === null) {
-        delete securityData.dlExpiration;
       }
       
       if (securityData.dateOfBirth && typeof securityData.dateOfBirth === 'string' && securityData.dateOfBirth.trim() !== '') {
@@ -881,9 +823,9 @@ exports.postLead = async (req, res, next) => {
       }
       const validLeadFields = [
         'firstName', 'lastName', 'email', 'phone', 'alternatePhone',
-        'serviceAddress', 'previousAddress', 'shippingAddress', 'customerTypeId',
+        'serviceAddress', 'shippingAddress', 'customerTypeId',
         'agentTeamId', 'comment', 'cardTypeId', 
-        'status', 'installationType', 'installationDatetime', 'assignedToId',
+        'status', 'assignedToId',
         'externalId', 'serviceTypeIds', 'packageTypeIds', 'providerBeingSoldIds',
         'service_configurations'
       ];
@@ -895,7 +837,7 @@ exports.postLead = async (req, res, next) => {
         }
       }
       data = filteredData;
-      const dateFields = ['installationDatetime'];
+      const dateFields = ['dateOfBirth'];
       for (const field of dateFields) {
         if (data[field] && typeof data[field] === 'string' && data[field].trim() !== '') {
           try {
@@ -913,8 +855,7 @@ exports.postLead = async (req, res, next) => {
         }
       }
       const optionalFieldsToClean = [
-        'alternatePhone', 'previousAddress', 'shippingAddress',
-        'installationType'
+        'alternatePhone', 'shippingAddress',
       ];
       
       for (const field of optionalFieldsToClean) {
@@ -1361,14 +1302,12 @@ exports.getLeadById = async (req, res, next) => {
         phone: true,
         alternatePhone: true,
         serviceAddress: true,
-        previousAddress: true,
         shippingAddress: true,
         comment: true,
         status: true,
-        installationType: true,
-        installationDatetime: true,
         externalId: true,
-        securityPin: true,
+        dateOfBirth: true,
+        policyNumber: true,
         createdAt: true,
         updatedAt: true,
         createdBy: {
@@ -1483,7 +1422,10 @@ exports.getLeadsByOrganization = async (req, res, next) => {
         { lastName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search, mode: 'insensitive' } },
-        { serviceAddress: { contains: search, mode: 'insensitive' } }
+        { serviceAddress: { contains: search, mode: 'insensitive' } },
+        { confirmationNumber: { contains: search, mode: 'insensitive' } },
+        { externalId: { contains: search, mode: 'insensitive' } },
+        { policyNumber: { contains: search, mode: 'insensitive' } }
       ];
     }
 
@@ -1503,13 +1445,12 @@ exports.getLeadsByOrganization = async (req, res, next) => {
           phone: true,
           alternatePhone: true,
           serviceAddress: true,
-          previousAddress: true,
           shippingAddress: true,
           comment: true,
           status: true,
-          installationType: true,
           externalId: true,
-          securityPin: true,
+          dateOfBirth: true,
+          policyNumber: true,
           confirmationNumber: true,
           createdAt: true,
           updatedAt: true,
@@ -1644,7 +1585,6 @@ exports.updateLead = async (req, res, next) => {
       last_name: 'lastName',
       alternate_phone: 'alternatePhone',
       service_address: 'serviceAddress',
-      previous_address: 'previousAddress',
       shipping_address: 'shippingAddress',
       service_types: 'serviceTypeIds',
       agent_team: 'agentTeamId',
@@ -1658,14 +1598,11 @@ exports.updateLead = async (req, res, next) => {
       billing_address_payment: 'billingAddressPayment',
       otc: 'otc',
       ssn_last_four: 'ssnLastFour',
-      state_id: 'stateId',
       dl_number_masked: 'dlNumberMasked',
       dl_state: 'dlState',
-      dl_expiration: 'dlExpiration',
       security_question: 'securityQuestion',
-      security_pin: 'securityPin',
-      installation_type: 'installationType',
-      installation_datetime: 'installationDatetime',
+      policy_number: 'policyNumber',
+      date_of_birth: 'dateOfBirth',
       assign_to: 'assignedToId',  
       status: 'status',
       external_id: 'externalId',
@@ -1753,12 +1690,9 @@ exports.updateLead = async (req, res, next) => {
     }
     const securityFields = [
       'ssnLastFour',
-      'stateId',
       'dlNumberMasked',
       'dlState',
-      'dlExpiration',
-      'securityQuestion',
-      'dateOfBirth'
+      'securityQuestion'
     ];
     const securityData = {};
     for (const field of securityFields) {
@@ -1770,20 +1704,6 @@ exports.updateLead = async (req, res, next) => {
       }
     }
 
-    if (securityData.dlExpiration && typeof securityData.dlExpiration === 'string' && securityData.dlExpiration.trim() !== '') {
-      try {
-        const date = new Date(securityData.dlExpiration);
-        if (!isNaN(date.getTime())) {
-          securityData.dlExpiration = date.toISOString();
-        } else {
-          delete securityData.dlExpiration;
-        }
-      } catch (error) {
-        delete securityData.dlExpiration;
-      }
-    } else if (securityData.dlExpiration === '' || securityData.dlExpiration === null) {
-      delete securityData.dlExpiration;
-    }
     
     if (securityData.dateOfBirth && typeof securityData.dateOfBirth === 'string' && securityData.dateOfBirth.trim() !== '') {
       try {
@@ -1801,9 +1721,9 @@ exports.updateLead = async (req, res, next) => {
     }
     const validLeadFields = [
       'firstName', 'lastName', 'email', 'phone', 'alternatePhone',
-      'serviceAddress', 'previousAddress', 'shippingAddress', 'customerTypeId',
+      'serviceAddress', 'shippingAddress', 'customerTypeId',
       'agentTeamId', 'comment', 'cardTypeId', 'dateOfBirth',
-      'status', 'installationType', 'installationDatetime', 'securityPin', 'assignedToId',
+      'status', 'policyNumber', 'assignedToId',
       'externalId', 'serviceTypeIds', 'packageTypeIds', 'providerBeingSoldIds',
       'service_configurations'
     ];
@@ -1822,7 +1742,7 @@ exports.updateLead = async (req, res, next) => {
         message: 'You do not have permission to mark leads as completed or closed lost. Use the POST endpoint instead.'
       });
     }
-    const dateFields = ['installationDatetime'];
+    const dateFields = ['dateOfBirth'];
     for (const field of dateFields) {
       if (data[field] && typeof data[field] === 'string' && data[field].trim() !== '') {
         try {
@@ -1840,8 +1760,7 @@ exports.updateLead = async (req, res, next) => {
       }
     }
     const optionalFieldsToClean = [
-      'alternatePhone', 'previousAddress', 'shippingAddress',
-      'installationType'
+      'alternatePhone', 'shippingAddress',
     ];    
     for (const field of optionalFieldsToClean) {
       if (data[field] === '' || data[field] === null || data[field] === undefined) {
@@ -2103,14 +2022,12 @@ exports.updateLead = async (req, res, next) => {
         phone: true,
         alternatePhone: true,
         serviceAddress: true,
-        previousAddress: true,
         shippingAddress: true,
         comment: true,
         status: true,
-        installationType: true,
-        installationDatetime: true,
         externalId: true,
-        securityPin: true,
+        dateOfBirth: true,
+        policyNumber: true,
         createdAt: true,
         updatedAt: true,
         createdBy: {
@@ -2322,19 +2239,38 @@ exports.getLeadsByUser = async (req, res, next) => {
       lastName,
       phone,
       fromDate,
-      toDate
+      toDate,
+      email,
+      confirmationNumber
     } = req.query;
     
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
     
+    const requestingUserPermissions = await getUserPermissions(req.user);
+    const hasUserRolesPermission = requestingUserPermissions.some(
+      perm => perm.resource === 'USER_ROLES' && (perm.action === 'READ' || perm.action === 'MANAGE')
+    );
+    const hasSalesReportPermission = requestingUserPermissions.some(
+      perm => perm.resource === 'SALES_REPORT' && (perm.action === 'READ' || perm.action === 'MANAGE')
+    );
+    
+    const isOrgAdmin = req.user.roles && req.user.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+    const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'SUPER_ADMIN');
+    
+    const showAllLeads = (hasUserRolesPermission && hasSalesReportPermission) || isOrgAdmin || isSuperAdmin;
+    
     const where = {
-      OR: [
+      organizationId: req.user.organizationId
+    };
+    
+    if (!showAllLeads) {
+      where.OR = [
         { createdById: parseInt(userId) },
         { assignedToId: parseInt(userId) }
-      ]
-    };
+      ];
+    }
     
     if (status) {
       where.status = status;
@@ -2347,7 +2283,13 @@ exports.getLeadsByUser = async (req, res, next) => {
     if (lastName && lastName.trim() !== '') {
       where.lastName = { contains: lastName.trim(), mode: 'insensitive' }
     }
-    
+
+    if (email && email.trim() !== '') {
+      where.email = { contains: email.trim(), mode: 'insensitive' };
+    }
+    if (confirmationNumber && confirmationNumber.trim() !== '') {
+      where.confirmationNumber = { contains: confirmationNumber.trim(), mode: 'insensitive' };
+    }
     if (phone && phone.trim() !== '') {
       where.phone = { contains: phone.trim(), mode: 'insensitive' };
     }
@@ -2378,7 +2320,10 @@ exports.getLeadsByUser = async (req, res, next) => {
             { lastName: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
             { phone: { contains: search, mode: 'insensitive' } },
-            { serviceAddress: { contains: search, mode: 'insensitive' } }
+            { serviceAddress: { contains: search, mode: 'insensitive' } },
+            { confirmationNumber: { contains: search, mode: 'insensitive' } },
+            { externalId: { contains: search, mode: 'insensitive' } },
+            { policyNumber: { contains: search, mode: 'insensitive' } }
           ]
         }
       ];
@@ -2400,14 +2345,12 @@ exports.getLeadsByUser = async (req, res, next) => {
           phone: true,
           alternatePhone: true,
           serviceAddress: true,
-          previousAddress: true,
           shippingAddress: true,
           comment: true,
           status: true,
-          installationType: true,
-          installationDatetime: true,
           externalId: true,
-          securityPin: true,
+          dateOfBirth: true,
+          policyNumber: true,
           confirmationNumber: true,
           createdAt: true,
           updatedAt: true,
@@ -2517,9 +2460,19 @@ exports.getLeadsByUser = async (req, res, next) => {
         firstName,
         lastName,
         phone,
+        email,
+        confirmationNumber,
         fromDate,
         toDate,
         search
+      },
+      permissionInfo: {
+        showAllLeads,
+        hasUserRolesPermission,
+        hasSalesReportPermission,
+        isOrgAdmin,
+        isSuperAdmin,
+        requestedUserId: parseInt(userId)
       }
     });
   } catch (error) {
@@ -2835,10 +2788,8 @@ exports.getSalesReport = async (req, res, next) => {
         { confirmationNumber: { contains: searchTerm, mode: 'insensitive' } },
         { alternatePhone: { contains: searchTerm, mode: 'insensitive' } },
         { serviceAddress: { contains: searchTerm, mode: 'insensitive' } },
-        { previousAddress: { contains: searchTerm, mode: 'insensitive' } },
         { shippingAddress: { contains: searchTerm, mode: 'insensitive' } },
         { comment: { contains: searchTerm, mode: 'insensitive' } },
-        { installationDatetime: { contains: searchTerm, mode: 'insensitive' } },
         { customerType: { displayName: { contains: searchTerm, mode: 'insensitive' } } },
         { cardType: { displayName: { contains: searchTerm, mode: 'insensitive' } } },
         { agentTeam: { name: { contains: searchTerm, mode: 'insensitive' } } },
@@ -2851,11 +2802,11 @@ exports.getSalesReport = async (req, res, next) => {
         { payments: { some: { cardholderName: { contains: searchTerm, mode: 'insensitive' } } } },
         { payments: { some: { cardNumber: { contains: searchTerm, mode: 'insensitive' } } } },
         { securities: { some: { ssnLastFour: { contains: searchTerm, mode: 'insensitive' } } } },
-        { securities: { some: { stateId: { contains: searchTerm, mode: 'insensitive' } } } },
         { securities: { some: { dlNumberMasked: { contains: searchTerm, mode: 'insensitive' } } } },
         { securities: { some: { dlState: { contains: searchTerm, mode: 'insensitive' } } } },
         { securities: { some: { securityQuestion: { contains: searchTerm, mode: 'insensitive' } } } },
-        { securityPin: { contains: searchTerm, mode: 'insensitive' } },
+        { policyNumber: { contains: searchTerm, mode: 'insensitive' } },
+        { externalId: { contains: searchTerm, mode: 'insensitive' } },
         { leadServiceTypes: { some: { serviceType: { displayName: { contains: searchTerm, mode: 'insensitive' } } } } },
         { leadPackageTypes: { some: { packageType: { displayName: { contains: searchTerm, mode: 'insensitive' } } } } },
         { leadPackageTypes: { some: { packageType: { displayName: { contains: searchTerm, mode: 'insensitive' } } } } },
@@ -2901,13 +2852,12 @@ exports.getSalesReport = async (req, res, next) => {
           phone: true,
           alternatePhone: true,
           serviceAddress: true,
-          previousAddress: true,
           shippingAddress: true,
           comment: true,
           status: true,
-          installationDatetime: true,
           externalId: true,
-          securityPin: true,
+          dateOfBirth: true,
+          policyNumber: true,
           confirmationNumber: true,
           createdAt: true,
           updatedAt: true,
@@ -3129,8 +3079,11 @@ exports.getFinalReport = async (req, res, next) => {
         { lastName: { contains: searchTerm, mode: 'insensitive' } },
         { email: { contains: searchTerm, mode: 'insensitive' } },
         { phone: { contains: searchTerm, mode: 'insensitive' } },
+        { serviceAddress: { contains: searchTerm, mode: 'insensitive' } },
         { comment: { contains: searchTerm, mode: 'insensitive' } },
-        { confirmationNumber: { contains: searchTerm, mode: 'insensitive' } }
+        { confirmationNumber: { contains: searchTerm, mode: 'insensitive' } },
+        { externalId: { contains: searchTerm, mode: 'insensitive' } },
+        { policyNumber: { contains: searchTerm, mode: 'insensitive' } }
       ];
     }
     
@@ -3171,14 +3124,12 @@ exports.getFinalReport = async (req, res, next) => {
           phone: true,
           alternatePhone: true,
           serviceAddress: true,
-          previousAddress: true,
           shippingAddress: true,
           comment: true,
           status: true,
-          installationType: true,
-          installationDatetime: true,
           externalId: true,
-          securityPin: true,
+          dateOfBirth: true,
+          policyNumber: true,
           confirmationNumber: true,
           createdAt: true,
           updatedAt: true,
@@ -3193,12 +3144,9 @@ exports.getFinalReport = async (req, res, next) => {
             select: {
               id: true,
               ssnLastFour: true,
-              stateId: true,
               dlState: true,
               dlNumberMasked: true,
-              dlExpiration: true,
               securityQuestion: true,
-              dateOfBirth: true
             }
           },
           cardType: {
@@ -3330,9 +3278,9 @@ exports.getLeadByPhone = async(req , res , next) =>{
             phone: true,
             alternatePhone: true,
             serviceAddress: true,
-            previousAddress: true,
             shippingAddress: true,
             externalId: true,
+            dateOfBirth: true,
             createdAt: true,
             updatedAt: true,
             createdBy: {

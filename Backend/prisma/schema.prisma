@@ -157,13 +157,11 @@ model Lead {
   phone                     String                  
   alternatePhone            String?
   serviceAddress            String
-  previousAddress           String?
   shippingAddress           String?
   cardTypeId                Int?
-  securityPin               String?
+  policyNumber              String?
   confirmationNumber        String?                 @unique
-  installationType          String?                 @default("professional")
-  installationDatetime      String?
+  dateOfBirth               DateTime?
   notes                     String?
   createdAt                 DateTime                @default(now())
   updatedAt                 DateTime                @updatedAt
@@ -313,11 +311,8 @@ model Security {
   id               Int          @id @default(autoincrement())
   leadId           Int
   ssnLastFour      String?
-  stateId          String?
   dlNumberMasked   String?
-  dateOfBirth      DateTime?
   dlState          String?
-  dlExpiration     DateTime?
   securityQuestion String?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
