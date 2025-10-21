@@ -167,6 +167,75 @@ router.post('/register', authLimiter, [
  *                       type: string
  *                       enum: [SUPER_ADMIN, ORGANIZATION_ADMIN, USER]
  *                       example: "ORGANIZATION_ADMIN"
+ *                     roles:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 1
+ *                           name:
+ *                             type: string
+ *                             example: "ORGANIZATION_ADMIN"
+ *                           description:
+ *                             type: string
+ *                             example: "Organization administrator with full access"
+ *                           isActive:
+ *                             type: boolean
+ *                             example: true
+ *                           isAgent:
+ *                             type: boolean
+ *                             example: false
+ *                           createdAt:
+ *                             type: string
+ *                             format: date-time
+ *                           updatedAt:
+ *                             type: string
+ *                             format: date-time
+ *                           organizationId:
+ *                             type: integer
+ *                             example: 1
+ *                           permissions:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                               properties:
+ *                                 id:
+ *                                   type: integer
+ *                                   example: 1
+ *                                 action:
+ *                                   type: string
+ *                                   example: "CREATE"
+ *                                 resource:
+ *                                   type: string
+ *                                   example: "LEADS"
+ *                                 createdAt:
+ *                                   type: string
+ *                                   format: date-time
+ *                                 organization:
+ *                                   type: object
+ *                                   properties:
+ *                                     id:
+ *                                       type: integer
+ *                                       example: 1
+ *                                     name:
+ *                                       type: string
+ *                                       example: "Example Organization"
+ *                                     slug:
+ *                                       type: string
+ *                                       example: "example-org"
+ *                     permissions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           action:
+ *                             type: string
+ *                             example: "CREATE"
+ *                           resource:
+ *                             type: string
+ *                             example: "LEADS"
  *                     organizations:
  *                       type: array
  *                       items:
@@ -201,6 +270,35 @@ router.post('/register', authLimiter, [
  *                           role:
  *                             type: string
  *                             example: "ORGANIZATION_ADMIN"
+ *                           roleDetails:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 1
+ *                               name:
+ *                                 type: string
+ *                                 example: "ORGANIZATION_ADMIN"
+ *                               description:
+ *                                 type: string
+ *                                 example: "Organization administrator with full access"
+ *                               isActive:
+ *                                 type: boolean
+ *                                 example: true
+ *                               isAgent:
+ *                                 type: boolean
+ *                                 example: false
+ *                               permissions:
+ *                                 type: array
+ *                                 items:
+ *                                   type: object
+ *                                   properties:
+ *                                     action:
+ *                                       type: string
+ *                                       example: "CREATE"
+ *                                     resource:
+ *                                       type: string
+ *                                       example: "LEADS"
  *                           createdBy:
  *                             type: object
  *                             properties:

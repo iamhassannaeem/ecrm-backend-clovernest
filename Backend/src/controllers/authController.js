@@ -231,7 +231,21 @@ exports.login = async (req, res, next) => {
       },
       include: {
         organization: true,
-        roles: true,
+        roles: {
+          include: {
+            rolePermissions: {
+              include: {
+                organization: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                  }
+                }
+              }
+            }
+          }
+        },
         auditLogs: true,
         refreshTokens: true,
         leadsCreated: true,
@@ -287,13 +301,34 @@ exports.login = async (req, res, next) => {
     const accessToken = generateAccessToken({ userId: user.id, organizationId, permissions });
     const refreshToken = await generateRefreshToken(user.id);
     
+    // Build complete role details with permissions
+    const rolesWithPermissions = user.roles.map(role => ({
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      isActive: role.isActive,
+      isAgent: role.isAgent,
+      createdAt: role.createdAt,
+      updatedAt: role.updatedAt,
+      organizationId: role.organizationId,
+      permissions: role.rolePermissions.map(permission => ({
+        id: permission.id,
+        action: permission.action,
+        resource: permission.resource,
+        createdAt: permission.createdAt,
+        organization: permission.organization
+      }))
+    }));
+
     let userResponse = {
       id: user.id,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
       emailVerified: user.emailVerified,
-      role: user.roles.length > 0 ? user.roles[0].name : null
+      systemRole: user.roles.length > 0 ? user.roles[0].name : null,
+      roles: rolesWithPermissions,
+      permissions: permissions
     };
     
     if (user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN')) {
@@ -352,7 +387,18 @@ exports.login = async (req, res, next) => {
           createdAt: user.organization.createdAt,
           updatedAt: user.organization.updatedAt,
           createdById: user.organization.createdById,
-          role: user.roles.length > 0 ? user.roles[0].name : null
+          role: user.roles.length > 0 ? user.roles[0].name : null,
+          roleDetails: user.roles.length > 0 ? {
+            id: user.roles[0].id,
+            name: user.roles[0].name,
+            description: user.roles[0].description,
+            isActive: user.roles[0].isActive,
+            isAgent: user.roles[0].isAgent,
+            permissions: user.roles[0].rolePermissions.map(permission => ({
+              action: permission.action,
+              resource: permission.resource
+            }))
+          } : null
         }];
       } else {
         userResponse.organizations = [];
