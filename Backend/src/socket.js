@@ -278,7 +278,7 @@ module.exports = function(io) {
         });
 
         
-        socket.to(`conversation_${conversation.id}`).emit('messagesRead', {
+        io.to(`conversation_${conversation.id}`).emit('messagesRead', {
           conversationId: conversation.id.toString(),
           readBy: userId,
           timestamp: new Date()
@@ -458,7 +458,7 @@ module.exports = function(io) {
         });
 
         
-        socket.to(`conversation_${conversation.id}`).emit('messagesRead', {
+        io.to(`conversation_${conversation.id}`).emit('messagesRead', {
           conversationId: conversation.id.toString(),
           readBy: userId,
           timestamp: new Date()
@@ -473,14 +473,11 @@ module.exports = function(io) {
     
     socket.on('sendMessage', async ({ conversationId, content, messageType = 'text' }) => {
       const startTime = Date.now();
-      console.log(`[Socket.IO] 📨 MESSAGE RECEIVED - User ${userId} sending message to conversation ${conversationId}`);
-      console.log(`[Socket.IO] 📨 Message content: "${content}"`);
-      console.log(`[Socket.IO] 📨 Message type: ${messageType}`);
-      console.log(`[Socket.IO] 📨 Timestamp: ${new Date().toISOString()}`);
+    
       
       try {
         if (!conversationId || !content) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - Missing conversationId or content`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - Missing conversationId or content`);
           socket.emit('error', { message: 'Conversation ID and content are required' });
           return;
         }
@@ -492,12 +489,12 @@ module.exports = function(io) {
         });
 
         if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
-          console.log(`[Socket.IO] ❌ PERMISSION DENIED - User ${userId} not participant in conversation ${conversationId}`);
+          console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} not participant in conversation ${conversationId}`);
           socket.emit('error', { message: 'Not a participant in this conversation' });
           return;
         }
 
-        console.log(`[Socket.IO] ✅ PERMISSION VERIFIED - User ${userId} is participant in conversation ${conversationId}`);
+        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in conversation ${conversationId}`);
 
         
         const message = await prisma.message.create({
@@ -557,14 +554,13 @@ module.exports = function(io) {
           }))
         };
 
-        console.log(`[Socket.IO] 📤 BROADCASTING MESSAGE - Broadcasting to conversation ${conversationId}`);
-        console.log(`[Socket.IO] 📤 Message data:`, JSON.stringify(messageData, null, 2));
+     
 
         
         io.to(`conversation_${conversationId}`).emit('newMessage', messageData);
         
         const broadcastTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ MESSAGE BROADCASTED - Time from receive to broadcast: ${broadcastTime}ms`);
+        console.log(`[Socket.IO]  MESSAGE BROADCASTED - Time from receive to broadcast: ${broadcastTime}ms`);
 
         
         socket.emit('messageDelivered', {
@@ -573,7 +569,7 @@ module.exports = function(io) {
           timestamp: new Date()
         });
 
-        console.log(`[Socket.IO] ✅ DELIVERY CONFIRMATION SENT - To sender ${userId}, message ID: ${message.id}`);
+        console.log(`[Socket.IO]  DELIVERY CONFIRMATION SENT - To sender ${userId}, message ID: ${message.id}`);
 
         
         await updateUnreadCount(conversationId);
@@ -610,20 +606,16 @@ module.exports = function(io) {
               content: content.length > 50 ? content.substring(0, 50) + '...' : content,
               timestamp: new Date()
             });
-            console.log(`[Socket.IO] 🔔 PUSH NOTIFICATION SENT - To online user ${participant.userId} (not in conversation)`);
+            console.log(`[Socket.IO]  PUSH NOTIFICATION SENT - To online user ${participant.userId} (not in conversation)`);
           }
         }
 
         const totalTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ MESSAGE PROCESSING COMPLETE - Total time: ${totalTime}ms`);
-        console.log(`[Socket.IO] 📊 PERFORMANCE SUMMARY:`);
-        console.log(`[Socket.IO] 📊 - DB save: ${Date.now() - startTime - totalTime + broadcastTime}ms`);
-        console.log(`[Socket.IO] 📊 - Broadcast: ${broadcastTime}ms`);
-        console.log(`[Socket.IO] 📊 - Total: ${totalTime}ms`);
+       
 
       } catch (error) {
         const errorTime = Date.now() - startTime;
-        console.error(`[Socket.IO] ❌ ERROR in sendMessage after ${errorTime}ms:`, error);
+        console.error(`[Socket.IO]  ERROR in sendMessage after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to send message' });
       }
     });
@@ -636,14 +628,14 @@ module.exports = function(io) {
       
       try {
         if (!conversationId || !fileData || !fileName || !mimeType || !size) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - Missing required attachment data`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - Missing required attachment data`);
           socket.emit('error', { message: 'Conversation ID, file data, file name, MIME type, and size are required' });
           return;
         }
 
         // Validate file size (e.g., max 10MB)
         if (size > 10 * 1024 * 1024) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File size too large: ${size} bytes`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - File size too large: ${size} bytes`);
           socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
           return;
         }
@@ -658,7 +650,7 @@ module.exports = function(io) {
         ];
         
         if (!allowedMimeTypes.includes(mimeType)) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File type not allowed: ${mimeType}`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - File type not allowed: ${mimeType}`);
           socket.emit('error', { message: 'File type not allowed' });
           return;
         }
@@ -670,12 +662,12 @@ module.exports = function(io) {
         });
 
         if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
-          console.log(`[Socket.IO] ❌ PERMISSION DENIED - User ${userId} not participant in conversation ${conversationId}`);
+          console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} not participant in conversation ${conversationId}`);
           socket.emit('error', { message: 'Not a participant in this conversation' });
           return;
         }
 
-        console.log(`[Socket.IO] ✅ PERMISSION VERIFIED - User ${userId} is participant in conversation ${conversationId}`);
+        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in conversation ${conversationId}`);
 
         // Create a message first
         const message = await prisma.message.create({
@@ -706,7 +698,7 @@ module.exports = function(io) {
           }
         });
 
-        console.log(`[Socket.IO] 💾 MESSAGE CREATED - Message ID: ${message.id}`);
+        console.log(`[Socket.IO]  MESSAGE CREATED - Message ID: ${message.id}`);
 
         // Convert base64 to buffer and save file
         const fileBuffer = Buffer.from(fileData, 'base64');
@@ -774,7 +766,7 @@ module.exports = function(io) {
         io.to(`conversation_${conversationId}`).emit('newMessage', messageData);
         
         const broadcastTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ ATTACHMENT BROADCASTED - Time: ${broadcastTime}ms`);
+        console.log(`[Socket.IO]  ATTACHMENT BROADCASTED - Time: ${broadcastTime}ms`);
 
         // Send delivery confirmation to sender
         socket.emit('attachmentDelivered', {
@@ -784,7 +776,7 @@ module.exports = function(io) {
           timestamp: new Date()
         });
 
-        console.log(`[Socket.IO] ✅ DELIVERY CONFIRMATION SENT - To sender ${userId}`);
+        console.log(`[Socket.IO]  DELIVERY CONFIRMATION SENT - To sender ${userId}`);
 
         // Update unread count
         await updateUnreadCount(conversationId);
@@ -826,16 +818,16 @@ module.exports = function(io) {
               content: `📎 ${fileName}`,
               timestamp: new Date()
             });
-            console.log(`[Socket.IO] 🔔 PUSH NOTIFICATION SENT - To online user ${participant.userId}`);
+            console.log(`[Socket.IO]  PUSH NOTIFICATION SENT - To online user ${participant.userId}`);
           }
         }
 
         const totalTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ ATTACHMENT PROCESSING COMPLETE - Total time: ${totalTime}ms`);
+        console.log(`[Socket.IO]  ATTACHMENT PROCESSING COMPLETE - Total time: ${totalTime}ms`);
 
       } catch (error) {
         const errorTime = Date.now() - startTime;
-        console.error(`[Socket.IO] ❌ ERROR in uploadAttachment after ${errorTime}ms:`, error);
+        console.error(`[Socket.IO]  ERROR in uploadAttachment after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to upload attachment' });
       }
     });
@@ -848,14 +840,14 @@ module.exports = function(io) {
       
       try {
         if (!groupId || !fileData || !fileName || !mimeType || !size) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - Missing required group attachment data`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - Missing required group attachment data`);
           socket.emit('error', { message: 'Group ID, file data, file name, MIME type, and size are required' });
           return;
         }
 
         // Validate file size (e.g., max 10MB)
         if (size > 10 * 1024 * 1024) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File size too large: ${size} bytes`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - File size too large: ${size} bytes`);
           socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
           return;
         }
@@ -870,7 +862,7 @@ module.exports = function(io) {
         ];
         
         if (!allowedMimeTypes.includes(mimeType)) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - File type not allowed: ${mimeType}`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - File type not allowed: ${mimeType}`);
           socket.emit('error', { message: 'File type not allowed' });
           return;
         }
@@ -897,12 +889,12 @@ module.exports = function(io) {
         });
 
         if (!participant || !participant.groupChat) {
-          console.log(`[Socket.IO] ❌ PERMISSION DENIED - User ${userId} not participant in group ${groupId}`);
-          socket.emit('error', { message: 'Not a participant in this group' });
+          console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} not participant in group ${groupId}`);
+          socket.emit('error', { message: 'Not a participant in this group' })
           return;
         }
 
-        console.log(`[Socket.IO] ✅ PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
+        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
 
         // Create a message first
         const message = await prisma.groupChatMessage.create({
@@ -933,9 +925,6 @@ module.exports = function(io) {
           }
         });
 
-        console.log(`[Socket.IO] 💾 GROUP MESSAGE CREATED - Message ID: ${message.id}`);
-
-        // Convert base64 to buffer and save file
         const fileBuffer = Buffer.from(fileData, 'base64');
         const fileExtension = path.extname(fileName);
         const finalFileName = `${Date.now()}_${fileName}`;
@@ -994,32 +983,23 @@ module.exports = function(io) {
           }]
         };
 
-        console.log(`[Socket.IO] 📤 BROADCASTING GROUP ATTACHMENT - Broadcasting to group ${groupId}`);
-
-        // Broadcast to all participants in the group
         io.to(`group_${groupId}`).emit('newGroupMessage', messageData);
         
         const broadcastTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ GROUP ATTACHMENT BROADCASTED - Time: ${broadcastTime}ms`);
-
-        // Send delivery confirmation to sender
+      
         socket.emit('groupAttachmentDelivered', {
           messageId: message.id,
           attachmentId: attachment.id,
           groupId: groupId.toString(),
           timestamp: new Date()
         });
-
-        console.log(`[Socket.IO] ✅ GROUP DELIVERY CONFIRMATION SENT - To sender ${userId}`);
-
-        // Handle notifications for offline users
         const otherParticipants = participant.groupChat.participants.filter(p => p.userId !== userId);
         
         for (const otherParticipant of otherParticipants) {
           const isOnline = activeConnections.has(otherParticipant.userId);
           
           if (!isOnline) {
-            // Pass attachment information to notification
+          
             await createChatMessageNotification(
               userId,
               otherParticipant.userId,
@@ -1049,16 +1029,15 @@ module.exports = function(io) {
               content: `📎 ${fileName}`,
               timestamp: new Date()
             });
-            console.log(`[Socket.IO] 🔔 GROUP PUSH NOTIFICATION SENT - To online user ${otherParticipant.userId}`);
           }
         }
 
         const totalTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ GROUP ATTACHMENT PROCESSING COMPLETE - Total time: ${totalTime}ms`);
+        console.log(`[Socket.IO]  GROUP ATTACHMENT PROCESSING COMPLETE - Total time: ${totalTime}ms`);
 
       } catch (error) {
         const errorTime = Date.now() - startTime;
-        console.error(`[Socket.IO] ❌ ERROR in uploadGroupAttachment after ${errorTime}ms:`, error);
+        console.error(`[Socket.IO]  ERROR in uploadGroupAttachment after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to upload group attachment' });
       }
     });
@@ -1066,31 +1045,53 @@ module.exports = function(io) {
     
     socket.on('messageReceived', ({ messageId, conversationId }) => {
       const timestamp = new Date().toISOString();
-      console.log(`[Socket.IO] ✅ FRONTEND CONFIRMATION - User ${userId} received message ${messageId} in conversation ${conversationId}`);
-      console.log(`[Socket.IO] ✅ FRONTEND CONFIRMATION - Timestamp: ${timestamp}`);
+      console.log(`[Socket.IO]  FRONTEND CONFIRMATION - User ${userId} received message ${messageId} in conversation ${conversationId}`);
+      console.log(`[Socket.IO]  FRONTEND CONFIRMATION - Timestamp: ${timestamp}`);
     });
 
     
     socket.on('messageDisplayed', ({ messageId, conversationId }) => {
       const timestamp = new Date().toISOString();
-      console.log(`[Socket.IO] ✅ FRONTEND DISPLAYED - User ${userId} displayed message ${messageId} in conversation ${conversationId}`);
-      console.log(`[Socket.IO] ✅ FRONTEND DISPLAYED - Timestamp: ${timestamp}`);
+      console.log(`[Socket.IO]  FRONTEND DISPLAYED - User ${userId} displayed message ${messageId} in conversation ${conversationId}`);
+      console.log(`[Socket.IO]  FRONTEND DISPLAYED - Timestamp: ${timestamp}`);
     });
 
     
-    socket.on('typing', ({ conversationId, isTyping }) => {
+    socket.on('typing', async ({ conversationId, isTyping }) => {
       const timestamp = new Date().toISOString();
       console.log(`[Socket.IO] ⌨️ TYPING - User ${userId} ${isTyping ? 'started' : 'stopped'} typing in conversation ${conversationId}`);
       console.log(`[Socket.IO] ⌨️ TYPING - Timestamp: ${timestamp}`);
       
       if (!conversationId) return;
-      
-      socket.to(`conversation_${conversationId}`).emit('userTyping', {
-        conversationId: conversationId.toString(),
-        userId,
-        isTyping,
-        timestamp: new Date()
-      });
+
+      // Validate user is a participant in the conversation
+      try {
+        const conversation = await prisma.chatSession.findUnique({
+          where: { id: conversationId },
+          include: { participants: true }
+        });
+
+        if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
+          console.warn(`[Socket.IO]  User ${userId} not in conversation ${conversationId} for typing indicator`);
+          return;
+        }
+
+        
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { firstName: true, lastName: true }
+        });
+        socket.to(`conversation_${conversationId}`).emit('userTyping', {
+          conversationId: conversationId.toString(),
+          userId,
+          isTyping,
+          timestamp: new Date()
+        });
+
+        console.log(`[Socket.IO]  userTyping event broadcasted to conversation ${conversationId}`);
+      } catch (error) {
+        console.error(`[Socket.IO]  Error handling typing event:`, error);
+      }
     });
 
     
@@ -1136,7 +1137,7 @@ module.exports = function(io) {
         await updateUnreadCount(conversationId);
 
         
-        socket.to(`conversation_${conversationId}`).emit('messagesRead', {
+        io.to(`conversation_${conversationId}`).emit('messagesRead', {
           conversationId: conversationId.toString(),
           readBy: userId,
           timestamp: new Date()
@@ -1195,8 +1196,8 @@ module.exports = function(io) {
           // Update unread count
           await updateUnreadCount(conversationId);
 
-          // Notify other participants
-          socket.to(`conversation_${conversationId}`).emit('messagesRead', {
+          // Notify all participants in real-time
+          io.to(`conversation_${conversationId}`).emit('messagesRead', {
             conversationId: conversationId.toString(),
             readBy: userId,
             timestamp: new Date(),
@@ -1350,12 +1351,11 @@ module.exports = function(io) {
     
     socket.on('sendGroupMessage', async ({ groupId, content, messageType = 'text' }) => {
       const startTime = Date.now();
-      console.log(`[Socket.IO] 📨 GROUP MESSAGE RECEIVED - User ${userId} sending message to group ${groupId}`);
-      console.log(`[Socket.IO] 📨 Message content: "${content}"`);
+      
       
       try {
         if (!groupId || !content) {
-          console.log(`[Socket.IO] ❌ VALIDATION FAILED - Missing groupId or content`);
+          console.log(`[Socket.IO]  VALIDATION FAILED - Missing groupId or content`);
           socket.emit('error', { message: 'Group ID and content are required' });
           return;
         }
@@ -1382,12 +1382,11 @@ module.exports = function(io) {
         });
 
         if (!participant || !participant.groupChat) {
-          console.log(`[Socket.IO] ❌ PERMISSION DENIED - User ${userId} not participant in group ${groupId}`);
           socket.emit('error', { message: 'Not a participant in this group' });
           return;
         }
 
-        console.log(`[Socket.IO] ✅ PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
+        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
 
         
         const message = await prisma.groupChatMessage.create({
@@ -1452,7 +1451,7 @@ module.exports = function(io) {
         io.to(`group_${groupId}`).emit('newGroupMessage', messageData);
         
         const broadcastTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ GROUP MESSAGE BROADCASTED - Time: ${broadcastTime}ms`);
+        console.log(`[Socket.IO]  GROUP MESSAGE BROADCASTED - Time: ${broadcastTime}ms`);
 
         
         socket.emit('groupMessageDelivered', {
@@ -1492,16 +1491,14 @@ module.exports = function(io) {
               content: content.length > 50 ? content.substring(0, 50) + '...' : content,
               timestamp: new Date()
             });
-            console.log(`[Socket.IO] 🔔 GROUP PUSH NOTIFICATION SENT - To online user ${otherParticipant.userId}`);
           }
         }
 
         const totalTime = Date.now() - startTime;
-        console.log(`[Socket.IO] ✅ GROUP MESSAGE PROCESSING COMPLETE - Total time: ${totalTime}ms`);
-
+       
       } catch (error) {
         const errorTime = Date.now() - startTime;
-        console.error(`[Socket.IO] ❌ ERROR in sendGroupMessage after ${errorTime}ms:`, error);
+        console.error(`[Socket.IO]  ERROR in sendGroupMessage after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to send group message' });
       }
     });
@@ -1512,18 +1509,6 @@ module.exports = function(io) {
       
       socket.to(`group_${groupId}`).emit('groupUserTyping', {
         groupId: groupId.toString(),
-        userId,
-        isTyping,
-        timestamp: new Date()
-      });
-    });
-
-    
-    socket.on('typing', ({ conversationId, isTyping }) => {
-      if (!conversationId) return;
-      
-      socket.to(`conversation_${conversationId}`).emit('userTyping', {
-        conversationId: conversationId.toString(),
         userId,
         isTyping,
         timestamp: new Date()
@@ -1544,7 +1529,6 @@ module.exports = function(io) {
           return;
         }
 
-        // Get all users in the organization
         const orgUsers = await prisma.user.findMany({
           where: {
             organizationId: user.organizationId,
@@ -1863,7 +1847,7 @@ module.exports = function(io) {
         const hasMore = messages.length === limit;
 
         socket.emit('messagesLoaded', {
-          conversationId: conversationId.toString(), // Convert BigInt to string
+          conversationId: conversationId.toString(), 
           messages: messages.reverse().map(m => ({
             id: m.id,
             senderId: m.senderId,
@@ -1968,7 +1952,7 @@ module.exports = function(io) {
             lastSeen: new Date(),
             timestamp: new Date(),
             reason: 'disconnect'
-          });
+          }); 
         }
       } catch (error) {
         console.error('[Socket.IO] Error notifying disconnect:', error);
