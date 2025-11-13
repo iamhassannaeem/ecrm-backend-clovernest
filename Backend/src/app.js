@@ -38,6 +38,7 @@ const lookupRoutes = require('./routes/lookup');
 const callsRoutes = require('./routes/calls');
 const notificationRoutes = require('./routes/notifications');
 const attachmentRoutes = require('./routes/attachments');
+const uploadRoutes = require('./routes/upload');
 
 
 // Initialize Express app
@@ -232,6 +233,7 @@ app.use('/api/lookup', lookupRoutes);
 app.use('/api/calls', callsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/attachments', attachmentRoutes);
+app.use('/api/upload', uploadRoutes);
 
 
 // Error handling middleware

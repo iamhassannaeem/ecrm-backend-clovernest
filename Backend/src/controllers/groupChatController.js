@@ -622,6 +622,7 @@ async function getGroupChatMessages(req, res) {
           select: {
             id: true,
             fileName: true,
+            filePath: true,
             mimeType: true,
             size: true,
             createdAt: true
@@ -645,6 +646,8 @@ async function getGroupChatMessages(req, res) {
         attachments: message.attachments.map(att => ({
           id: att.id,
           fileName: att.fileName,
+          fileUrl: att.filePath,
+          filePath: att.filePath,
           mimeType: att.mimeType,
           size: att.size.toString(),
           createdAt: att.createdAt
@@ -728,6 +731,7 @@ async function sendGroupChatMessage(req, res) {
           select: {
             id: true,
             fileName: true,
+            filePath: true,
             mimeType: true,
             size: true,
             createdAt: true
@@ -752,6 +756,8 @@ async function sendGroupChatMessage(req, res) {
         attachments: serializedMessage.attachments.map(att => ({
           id: att.id,
           fileName: att.fileName,
+          fileUrl: att.filePath,
+          filePath: att.filePath,
           mimeType: att.mimeType,
           size: att.size.toString(),
           createdAt: att.createdAt

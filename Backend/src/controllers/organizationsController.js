@@ -54,11 +54,7 @@ exports.updateOrganization = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { name, description, website, currency, language } = req.body;
-    let logoPath;
-    if (req.file) {
-      logoPath = req.file.path;
-    }
+    const { name, description, website, currency, language, logoUrl } = req.body;
     
     const updateData = {
       ...(name && { name }),
@@ -66,7 +62,7 @@ exports.updateOrganization = async (req, res, next) => {
       ...(website !== undefined && { website }),
       ...(currency !== undefined && { currency }),
       ...(language !== undefined && { language }),
-      ...(logoPath && { logo: logoPath })
+      ...(logoUrl && { logo: logoUrl })
     };
     
     const organization = await prisma.organization.update({
@@ -78,4 +74,4 @@ exports.updateOrganization = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-}; 
+};

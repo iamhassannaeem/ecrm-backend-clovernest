@@ -2,16 +2,6 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const multer = require('multer');
-const path = require('path');
-const storage = multer.diskStorage({
-  destination: 'uploads/',
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
-  }
-});
-const upload = multer({ storage });
 
 const router = express.Router();
 
@@ -167,13 +157,13 @@ router.get('/:organizationId', requireOrgUser, getOrganizationById);
  *       404:
  *         description: Organization not found
  */
-// Update organization
-router.put('/:organizationId', requireOrgAdmin, upload.single('logo'), [
+router.put('/:organizationId', requireOrgAdmin, [
   body('name').optional().trim().isLength({ min: 1, max: 100 }),
   body('description').optional().trim().isLength({ max: 500 }),
   body('website').optional().isURL(),
   body('currency').optional().isString(),
-  body('language').optional().isString()
+  body('language').optional().isString(),
+  body('logoUrl').optional().isURL()
 ], updateOrganization);
 
 // Get all Team Leads for an organization

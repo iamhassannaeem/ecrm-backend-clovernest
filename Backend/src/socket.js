@@ -2,8 +2,6 @@ const jwt = require('jsonwebtoken');
 const { prisma } = require('./config/database');
 const { createChatMessageNotification } = require('./controllers/notificationController');
 const { getUserPermissions } = require('./utils/audit');
-const path = require('path');
-const fs = require('fs').promises;
 
 
 function verifyToken(token) {
@@ -269,6 +267,8 @@ module.exports = function(io) {
             attachments: m.attachments.map(att => ({
               id: att.id,
               fileName: att.fileName,
+              fileUrl: att.filePath,
+              filePath: att.filePath,
               mimeType: att.mimeType,
               size: att.size.toString(),
               createdAt: att.createdAt
@@ -386,7 +386,9 @@ module.exports = function(io) {
         socket.join(`conversation_${conversation.id}`);
         userRooms.get(userId)?.add(`conversation_${conversation.id}`);
 
+        console.log(`[Socket.IO] User ${userId} joining conversation ${conversation.id}`);
         
+        // Fetch messages for the conversation
         const messages = await prisma.message.findMany({
           where: { chatSessionId: conversation.id },
           orderBy: { createdAt: 'desc' },
@@ -412,8 +414,10 @@ module.exports = function(io) {
           }
         });
 
+        console.log(`[Socket.IO] Loaded ${messages.length} messages for conversation ${conversation.id}`);
         
-        await prisma.message.updateMany({
+        // Mark messages as read
+        const updateResult = await prisma.message.updateMany({
           where: {
             chatSessionId: conversation.id,
             senderId: { not: userId },
@@ -425,7 +429,11 @@ module.exports = function(io) {
           }
         });
 
+        if (updateResult.count > 0) {
+          console.log(`[Socket.IO] Marked ${updateResult.count} messages as read in conversation ${conversation.id}`);
+        }
 
+        // Update unread count
         await updateUnreadCount(conversation.id);
 
         socket.emit('conversationLoaded', {
@@ -449,6 +457,8 @@ module.exports = function(io) {
             attachments: m.attachments.map(att => ({
               id: att.id,
               fileName: att.fileName,
+              fileUrl: att.filePath,
+              filePath: att.filePath,
               mimeType: att.mimeType,
               size: att.size.toString(),
               createdAt: att.createdAt
@@ -548,6 +558,8 @@ module.exports = function(io) {
           attachments: message.attachments.map(att => ({
             id: att.id,
             fileName: att.fileName,
+            fileUrl: att.filePath,
+            filePath: att.filePath,
             mimeType: att.mimeType,
             size: att.size.toString(),
             createdAt: att.createdAt
@@ -620,27 +632,24 @@ module.exports = function(io) {
       }
     });
 
-    // Handle file attachment upload for one-to-one chat
-    socket.on('uploadAttachment', async ({ conversationId, fileData, fileName, mimeType, size, content = '' }) => {
+    socket.on('uploadAttachment', async ({ conversationId, fileUrl, fileName, mimeType, size, content = '' }) => {
       const startTime = Date.now();
       console.log(`[Socket.IO] 📎 ATTACHMENT UPLOAD - User ${userId} uploading file to conversation ${conversationId}`);
       console.log(`[Socket.IO] 📎 File: ${fileName} (${mimeType}, ${size} bytes)`);
       
       try {
-        if (!conversationId || !fileData || !fileName || !mimeType || !size) {
+        if (!conversationId || !fileUrl || !fileName || !mimeType || !size) {
           console.log(`[Socket.IO]  VALIDATION FAILED - Missing required attachment data`);
-          socket.emit('error', { message: 'Conversation ID, file data, file name, MIME type, and size are required' });
+          socket.emit('error', { message: 'Conversation ID, file URL, file name, MIME type, and size are required' });
           return;
         }
 
-        // Validate file size (e.g., max 10MB)
         if (size > 10 * 1024 * 1024) {
           console.log(`[Socket.IO]  VALIDATION FAILED - File size too large: ${size} bytes`);
           socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
           return;
         }
 
-        // Validate MIME type (basic validation)
         const allowedMimeTypes = [
           'image/jpeg', 'image/png', 'image/gif', 'image/webp',
           'application/pdf', 'text/plain', 'application/msword',
@@ -655,7 +664,6 @@ module.exports = function(io) {
           return;
         }
 
-        // Verify user has access to this conversation
         const conversation = await prisma.chatSession.findUnique({
           where: { id: conversationId },
           include: { participants: true }
@@ -669,7 +677,6 @@ module.exports = function(io) {
 
         console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in conversation ${conversationId}`);
 
-        // Create a message first
         const message = await prisma.message.create({
           data: {
             chatSessionId: conversationId.toString(),
@@ -700,32 +707,13 @@ module.exports = function(io) {
 
         console.log(`[Socket.IO]  MESSAGE CREATED - Message ID: ${message.id}`);
 
-        // Convert base64 to buffer and save file
-        const fileBuffer = Buffer.from(fileData, 'base64');
-        const fileExtension = path.extname(fileName);
-        const finalFileName = `${Date.now()}_${fileName}`;
-        
-        const finalPath = path.join(
-          'uploads',
-          `org_${conversation.organizationId}`,
-          `user_${userId}`,
-          `chat_${conversationId}`,
-          `message_${message.id}`,
-          finalFileName
-        );
-
-        // Create directory and save file
-        await fs.mkdir(path.dirname(finalPath), { recursive: true });
-        await fs.writeFile(finalPath, fileBuffer);
-
-        // Create attachment record
         const attachment = await prisma.attachment.create({
           data: {
             organizationId: conversation.organizationId,
             userId: userId,
             messageId: message.id,
             fileName: fileName,
-            filePath: finalPath,
+            filePath: fileUrl,
             mimeType: mimeType,
             size: BigInt(size)
           }
@@ -754,6 +742,8 @@ module.exports = function(io) {
           attachments: [{
             id: attachment.id,
             fileName: attachment.fileName,
+            fileUrl: attachment.filePath,
+            filePath: attachment.filePath,
             mimeType: attachment.mimeType,
             size: attachment.size.toString(),
             createdAt: attachment.createdAt
@@ -832,27 +822,24 @@ module.exports = function(io) {
       }
     });
 
-    // Handle file attachment upload for group chat
-    socket.on('uploadGroupAttachment', async ({ groupId, fileData, fileName, mimeType, size, content = '' }) => {
+    socket.on('uploadGroupAttachment', async ({ groupId, fileUrl, fileName, mimeType, size, content = '' }) => {
       const startTime = Date.now();
       console.log(`[Socket.IO] 📎 GROUP ATTACHMENT UPLOAD - User ${userId} uploading file to group ${groupId}`);
       console.log(`[Socket.IO] 📎 File: ${fileName} (${mimeType}, ${size} bytes)`);
       
       try {
-        if (!groupId || !fileData || !fileName || !mimeType || !size) {
+        if (!groupId || !fileUrl || !fileName || !mimeType || !size) {
           console.log(`[Socket.IO]  VALIDATION FAILED - Missing required group attachment data`);
-          socket.emit('error', { message: 'Group ID, file data, file name, MIME type, and size are required' });
+          socket.emit('error', { message: 'Group ID, file URL, file name, MIME type, and size are required' });
           return;
         }
 
-        // Validate file size (e.g., max 10MB)
         if (size > 10 * 1024 * 1024) {
           console.log(`[Socket.IO]  VALIDATION FAILED - File size too large: ${size} bytes`);
           socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
           return;
         }
 
-        // Validate MIME type (basic validation)
         const allowedMimeTypes = [
           'image/jpeg', 'image/png', 'image/gif', 'image/webp',
           'application/pdf', 'text/plain', 'application/msword',
@@ -867,7 +854,6 @@ module.exports = function(io) {
           return;
         }
 
-        // Verify user is participant in this group chat
         const participant = await prisma.groupChatParticipant.findFirst({
           where: {
             groupChatId: BigInt(groupId),
@@ -896,7 +882,6 @@ module.exports = function(io) {
 
         console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
 
-        // Create a message first
         const message = await prisma.groupChatMessage.create({
           data: {
             groupChatId: BigInt(groupId),
@@ -925,31 +910,13 @@ module.exports = function(io) {
           }
         });
 
-        const fileBuffer = Buffer.from(fileData, 'base64');
-        const fileExtension = path.extname(fileName);
-        const finalFileName = `${Date.now()}_${fileName}`;
-        
-        const finalPath = path.join(
-          'uploads',
-          `org_${participant.groupChat.organizationId}`,
-          `user_${userId}`,
-          `group_${groupId}`,
-          `message_${message.id}`,
-          finalFileName
-        );
-
-        // Create directory and save file
-        await fs.mkdir(path.dirname(finalPath), { recursive: true });
-        await fs.writeFile(finalPath, fileBuffer);
-
-        // Create attachment record
         const attachment = await prisma.attachment.create({
           data: {
             organizationId: participant.groupChat.organizationId,
             userId: userId,
             groupMessageId: message.id,
             fileName: fileName,
-            filePath: finalPath,
+            filePath: fileUrl,
             mimeType: mimeType,
             size: BigInt(size)
           }
@@ -977,6 +944,8 @@ module.exports = function(io) {
           attachments: [{
             id: attachment.id,
             fileName: attachment.fileName,
+            fileUrl: attachment.filePath,
+            filePath: attachment.filePath,
             mimeType: attachment.mimeType,
             size: attachment.size.toString(),
             createdAt: attachment.createdAt
@@ -1333,6 +1302,8 @@ module.exports = function(io) {
             attachments: m.attachments.map(att => ({
               id: att.id,
               fileName: att.fileName,
+              fileUrl: att.filePath,
+              filePath: att.filePath,
               mimeType: att.mimeType,
               size: att.size.toString(),
               createdAt: att.createdAt
@@ -1439,6 +1410,8 @@ module.exports = function(io) {
           attachments: message.attachments.map(att => ({
             id: att.id,
             fileName: att.fileName,
+            fileUrl: att.filePath,
+            filePath: att.filePath,
             mimeType: att.mimeType,
             size: att.size.toString(),
             createdAt: att.createdAt
@@ -1650,6 +1623,64 @@ module.exports = function(io) {
           });
         }
 
+        // Get all chat sessions for the current user to find last message times
+        const chatSessions = await prisma.chatSession.findMany({
+          where: {
+            organizationId,
+            isActive: true,
+            participants: {
+              some: { userId }
+            }
+          },
+          select: {
+            id: true,
+            lastMessageAt: true,
+            participants: {
+              select: {
+                user: {
+                  select: {
+                    id: true
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        // Create a map of contactId -> lastMessageAt
+        const lastMessageMap = new Map();
+        chatSessions.forEach(session => {
+          const otherParticipant = session.participants.find(p => p.user.id !== userId);
+          if (otherParticipant && session.lastMessageAt) {
+            const existingTime = lastMessageMap.get(otherParticipant.user.id);
+            if (!existingTime || new Date(session.lastMessageAt) > new Date(existingTime)) {
+              lastMessageMap.set(otherParticipant.user.id, session.lastMessageAt);
+            }
+          }
+        });
+
+        // Sort function: recently chatted users first, then by name
+        const sortByRecentChat = (a, b) => {
+          const aLastMessage = lastMessageMap.get(a.id);
+          const bLastMessage = lastMessageMap.get(b.id);
+          
+          // If both have chat history, sort by lastMessageAt (most recent first)
+          if (aLastMessage && bLastMessage) {
+            return new Date(bLastMessage) - new Date(aLastMessage);
+          }
+          // If only one has chat history, prioritize it
+          if (aLastMessage && !bLastMessage) return -1;
+          if (!aLastMessage && bLastMessage) return 1;
+          // If neither has chat history, sort alphabetically by name
+          const aName = (a.firstName + ' ' + (a.lastName || '')).trim();
+          const bName = (b.firstName + ' ' + (b.lastName || '')).trim();
+          return aName.localeCompare(bName);
+        };
+
+        // Sort team leads and agents by recent chat activity
+        teamLeads.sort(sortByRecentChat);
+        agents.sort(sortByRecentChat);
+
         // Get current user info
         const selfUser = await prisma.user.findUnique({
           where: { id: userId },
@@ -1859,6 +1890,8 @@ module.exports = function(io) {
             attachments: m.attachments.map(att => ({
               id: att.id,
               fileName: att.fileName,
+              fileUrl: att.filePath,
+              filePath: att.filePath,
               mimeType: att.mimeType,
               size: att.size.toString(),
               createdAt: att.createdAt

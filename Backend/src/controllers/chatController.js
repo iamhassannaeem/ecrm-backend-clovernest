@@ -90,6 +90,64 @@ async function getContacts(req, res) {
       });
     }
 
+    // Get all chat sessions for the current user to find last message times
+    const chatSessions = await prisma.chatSession.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+        participants: {
+          some: { userId }
+        }
+      },
+      select: {
+        id: true,
+        lastMessageAt: true,
+        participants: {
+          select: {
+            user: {
+              select: {
+                id: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Create a map of contactId -> lastMessageAt
+    const lastMessageMap = new Map();
+    chatSessions.forEach(session => {
+      const otherParticipant = session.participants.find(p => p.user.id !== userId);
+      if (otherParticipant && session.lastMessageAt) {
+        const existingTime = lastMessageMap.get(otherParticipant.user.id);
+        if (!existingTime || new Date(session.lastMessageAt) > new Date(existingTime)) {
+          lastMessageMap.set(otherParticipant.user.id, session.lastMessageAt);
+        }
+      }
+    });
+
+    // Sort function: recently chatted users first, then by name
+    const sortByRecentChat = (a, b) => {
+      const aLastMessage = lastMessageMap.get(a.id);
+      const bLastMessage = lastMessageMap.get(b.id);
+      
+      // If both have chat history, sort by lastMessageAt (most recent first)
+      if (aLastMessage && bLastMessage) {
+        return new Date(bLastMessage) - new Date(aLastMessage);
+      }
+      // If only one has chat history, prioritize it
+      if (aLastMessage && !bLastMessage) return -1;
+      if (!aLastMessage && bLastMessage) return 1;
+      // If neither has chat history, sort alphabetically by name
+      const aName = (a.firstName + ' ' + (a.lastName || '')).trim();
+      const bName = (b.firstName + ' ' + (b.lastName || '')).trim();
+      return aName.localeCompare(bName);
+    };
+
+    // Sort team leads and agents by recent chat activity
+    teamLeads.sort(sortByRecentChat);
+    agents.sort(sortByRecentChat);
+
     res.json({
       teamLeads: teamLeads.map(u => ({
         id: u.id,
@@ -336,6 +394,7 @@ async function getMessages(req, res) {
             select: {
               id: true,
               fileName: true,
+              filePath: true,
               mimeType: true,
               size: true,
               createdAt: true
@@ -362,6 +421,8 @@ async function getMessages(req, res) {
         attachments: m.attachments.map(att => ({
           id: att.id,
           fileName: att.fileName,
+          fileUrl: att.filePath,
+          filePath: att.filePath,
           mimeType: att.mimeType,
           size: att.size.toString(),
           createdAt: att.createdAt
@@ -439,47 +500,23 @@ async function sendMessage(req, res) {
       }
     });
 
-    // Handle attachments if provided
     if (attachments && attachments.length > 0) {
-      const path = require('path');
-      const fs = require('fs').promises;
-      
       for (const attachment of attachments) {
-        if (attachment.fileData && attachment.fileName && attachment.mimeType && attachment.size) {
+        if (attachment.fileUrl && attachment.fileName && attachment.mimeType && attachment.size) {
           try {
-            // Convert base64 to buffer and save file
-            const fileBuffer = Buffer.from(attachment.fileData, 'base64');
-            const fileExtension = path.extname(attachment.fileName);
-            const finalFileName = `${Date.now()}_${attachment.fileName}`;
-            
-            const finalPath = path.join(
-              'uploads',
-              `org_${conversation.organizationId}`,
-              `user_${userId}`,
-              `chat_${conversationId}`,
-              `message_${message.id}`,
-              finalFileName
-            );
-
-            // Create directory and save file
-            await fs.mkdir(path.dirname(finalPath), { recursive: true });
-            await fs.writeFile(finalPath, fileBuffer);
-
-            // Create attachment record
             await prisma.attachment.create({
               data: {
                 organizationId: conversation.organizationId,
                 userId: userId,
                 messageId: message.id,
                 fileName: attachment.fileName,
-                filePath: finalPath,
+                filePath: attachment.fileUrl,
                 mimeType: attachment.mimeType,
                 size: BigInt(attachment.size)
               }
             });
           } catch (attachmentError) {
             console.error('Error saving attachment:', attachmentError);
-            // Continue with message even if attachment fails
           }
         }
       }
@@ -500,6 +537,7 @@ async function sendMessage(req, res) {
             select: {
               id: true,
               fileName: true,
+              filePath: true,
               mimeType: true,
               size: true,
               createdAt: true
@@ -545,6 +583,8 @@ async function sendMessage(req, res) {
         attachments: message.attachments.map(att => ({
           id: att.id,
           fileName: att.fileName,
+          fileUrl: att.filePath,
+          filePath: att.filePath,
           mimeType: att.mimeType,
           size: att.size.toString(),
           createdAt: att.createdAt
@@ -699,6 +739,8 @@ async function getUserConversations(req, res) {
           attachments: lastMessage.attachments.map(att => ({
             id: att.id,
             fileName: att.fileName,
+            fileUrl: att.filePath,
+            filePath: att.filePath,
             mimeType: att.mimeType,
             size: att.size.toString(),
             createdAt: att.createdAt
@@ -846,13 +888,12 @@ async function sendMessageWithAttachments(req, res) {
     // Validate attachments
     if (attachments && attachments.length > 0) {
       for (const attachment of attachments) {
-        if (!attachment.fileData || !attachment.fileName || !attachment.mimeType || !attachment.size) {
+        if (!attachment.fileUrl || !attachment.fileName || !attachment.mimeType || !attachment.size) {
           return res.status(400).json({ 
-            error: 'Each attachment must have fileData, fileName, mimeType, and size' 
+            error: 'Each attachment must have fileUrl, fileName, mimeType, and size' 
           });
         }
         
-        // Validate file size (e.g., max 10MB)
         if (attachment.size > 10 * 1024 * 1024) {
           return res.status(400).json({ 
             error: 'File size too large. Maximum size is 10MB' 
@@ -904,49 +945,28 @@ async function sendMessageWithAttachments(req, res) {
       }
     });
 
-    // Handle attachments if provided
     if (attachments && attachments.length > 0) {
-      const path = require('path');
-      const fs = require('fs').promises;
-      
       for (const attachment of attachments) {
-        try {
-          // Convert base64 to buffer and save file
-          const fileBuffer = Buffer.from(attachment.fileData, 'base64');
-          const fileExtension = path.extname(attachment.fileName);
-          const finalFileName = `${Date.now()}_${attachment.fileName}`;
-          
-          const finalPath = path.join(
-            'uploads',
-            `org_${conversation.organizationId}`,
-            `user_${userId}`,
-            `chat_${conversationId}`,
-            `message_${message.id}`,
-            finalFileName
-          );
-
-          // Create directory and save file
-          await fs.mkdir(path.dirname(finalPath), { recursive: true });
-          await fs.writeFile(finalPath, fileBuffer);
-
-          // Create attachment record
-          await prisma.attachment.create({
-            data: {
-              organizationId: conversation.organizationId,
-              userId: userId,
-              messageId: message.id,
-              fileName: attachment.fileName,
-              filePath: finalPath,
-              mimeType: attachment.mimeType,
-              size: BigInt(attachment.size)
-            }
-          });
-        } catch (attachmentError) {
-          console.error('Error saving attachment:', attachmentError);
-          return res.status(500).json({ 
-            success: false, 
-            error: 'Failed to save attachment' 
-          });
+        if (attachment.fileUrl && attachment.fileName && attachment.mimeType && attachment.size) {
+          try {
+            await prisma.attachment.create({
+              data: {
+                organizationId: conversation.organizationId,
+                userId: userId,
+                messageId: message.id,
+                fileName: attachment.fileName,
+                filePath: attachment.fileUrl,
+                mimeType: attachment.mimeType,
+                size: BigInt(attachment.size)
+              }
+            });
+          } catch (attachmentError) {
+            console.error('Error saving attachment:', attachmentError);
+            return res.status(500).json({ 
+              success: false, 
+              error: 'Failed to save attachment' 
+            });
+          }
         }
       }
       
@@ -966,6 +986,7 @@ async function sendMessageWithAttachments(req, res) {
             select: {
               id: true,
               fileName: true,
+              filePath: true,
               mimeType: true,
               size: true,
               createdAt: true
@@ -1011,6 +1032,8 @@ async function sendMessageWithAttachments(req, res) {
         attachments: message.attachments.map(att => ({
           id: att.id,
           fileName: att.fileName,
+          fileUrl: att.filePath,
+          filePath: att.filePath,
           mimeType: att.mimeType,
           size: att.size.toString(),
           createdAt: att.createdAt

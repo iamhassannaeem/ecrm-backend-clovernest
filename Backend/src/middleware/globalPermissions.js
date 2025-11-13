@@ -192,6 +192,7 @@ const globalPermissionMiddleware = (req, res, next) => {
     (req.path.startsWith('/api/organizations/') && req.path.endsWith('/roles/non-agents')) ||
     req.path.startsWith('/api/chat/') ||
     req.path.startsWith('/api/attachments/') ||
+    req.path.startsWith('/api/upload/') ||
     req.path.startsWith('/api/leads/orders/') && req.path.endsWith('/final-status') || 
     req.path.startsWith('/api/leads/phone/') ||
     req.path.startsWith('/api/notifications')) {  
