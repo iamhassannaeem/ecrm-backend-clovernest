@@ -902,6 +902,7 @@ module.exports = function(io) {
               select: {
                 id: true,
                 fileName: true,
+                filePath: true,
                 mimeType: true,
                 size: true,
                 createdAt: true
@@ -1269,6 +1270,7 @@ module.exports = function(io) {
               select: {
                 id: true,
                 fileName: true,
+                filePath: true,
                 mimeType: true,
                 size: true,
                 createdAt: true
@@ -1380,6 +1382,7 @@ module.exports = function(io) {
               select: {
                 id: true,
                 fileName: true,
+                filePath: true,
                 mimeType: true,
                 size: true,
                 createdAt: true

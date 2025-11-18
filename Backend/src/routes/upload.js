@@ -307,4 +307,87 @@ router.get('/view-url', authenticateToken, async (req, res) => {
   }
 });
 
+router.post('/download-proxy', authenticateToken, async (req, res) => {
+  try {
+    const { fileUrl, attachmentId } = req.body;
+
+    let filePath = fileUrl;
+
+    if (attachmentId && !fileUrl) {
+      const { prisma } = require('../config/database');
+      const userId = req.user.id;
+
+      const attachment = await prisma.attachment.findFirst({
+        where: {
+          OR: [
+            {
+              id: parseInt(attachmentId),
+              message: {
+                chatSession: {
+                  participants: {
+                    some: { userId }
+                  }
+                }
+              }
+            },
+            {
+              id: parseInt(attachmentId),
+              groupMessage: {
+                groupChat: {
+                  participants: {
+                    some: { userId }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      });
+
+      if (!attachment) {
+        return res.status(404).json({
+          success: false,
+          error: 'Attachment not found or access denied'
+        });
+      }
+
+      filePath = attachment.filePath;
+    }
+
+    if (!filePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'fileUrl or attachmentId is required'
+      });
+    }
+
+    // Extract the key from the URL
+    const key = backblazeService.extractKeyFromUrl(filePath);
+    
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid file URL. Could not extract key from URL.'
+      });
+    }
+
+    // Generate a fresh presigned URL (valid for 1 hour)
+    const signedUrl = await backblazeService.generatePresignedViewUrl(key, 3600);
+
+    res.json({
+      success: true,
+      data: { 
+        url: signedUrl,
+        fileUrl: filePath
+      }
+    });
+  } catch (error) {
+    console.error('Error generating download URL:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
