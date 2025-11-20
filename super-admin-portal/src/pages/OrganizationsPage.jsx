@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { organizationsAPI } from "../services/api";
 import { rolesAPI } from "../services/api";
-import { Search, Building2, Plus, Users, Calendar, Mail, Globe, User, Info, X, Shield } from "lucide-react";
+import { Search, Building2, Plus, Users, Calendar, Mail, Globe, User, Info, X, Shield, CreditCard } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 
 
@@ -49,6 +49,9 @@ export default function OrganizationsPage() {
   const [orgAdminPermsError, setOrgAdminPermsError] = useState("");
   const [orgAdminPermsSuccess, setOrgAdminPermsSuccess] = useState("");
   const [allPermissions, setAllPermissions] = useState([]);
+  const [cardValidationLoading, setCardValidationLoading] = useState(false);
+  const [cardValidationError, setCardValidationError] = useState("");
+  const [cardValidationSuccess, setCardValidationSuccess] = useState("");
 
   const navigate = useNavigate();
 
@@ -205,6 +208,29 @@ export default function OrganizationsPage() {
     }
   };
 
+  const handleToggleCardValidation = async (organizationId, currentValue) => {
+    setCardValidationLoading(true);
+    setCardValidationError("");
+    setCardValidationSuccess("");
+    try {
+      const newValue = !currentValue;
+      await organizationsAPI.updateCardValidation(organizationId, newValue);
+      setCardValidationSuccess(`Card validation ${newValue ? 'enabled' : 'disabled'} successfully`);
+      setSelectedOrg({ ...selectedOrg, enableCardValidation: newValue });
+      setOrganizations(prev => prev.map(org => 
+        org.id === organizationId 
+          ? { ...org, enableCardValidation: newValue }
+          : org
+      ));
+      setTimeout(() => setCardValidationSuccess(""), 3000);
+    } catch (err) {
+      setCardValidationError(err.response?.data?.error || "Failed to update card validation setting");
+      setTimeout(() => setCardValidationError(""), 5000);
+    } finally {
+      setCardValidationLoading(false);
+    }
+  };
+
   // Fetch all possible permissions when Org Admin Perms modal opens
   useEffect(() => {
     if (showOrgAdminPerms) {
@@ -216,37 +242,12 @@ export default function OrganizationsPage() {
 
   // Dynamically get all unique resources and actions from permissions
   const allResources = Array.from(new Set(allPermissions.map(p => p.resource)));
-  
-  // Define actions based on your requirements
-  const baseActions = ['CREATE', 'READ', 'UPDATE', 'DELETE'];
-  const allActions = [...baseActions, 'MANAGE', 'POST', 'CHAT'];
+  const allActions = Array.from(new Set(allPermissions.map(p => p.action)));
 
   // Helper functions
-  const isLeadResource = (resource) => 
-    resource.startsWith('LEAD_FORM') || resource === 'LEAD_FORM' || resource === 'SALES_REPORT' || resource === 'MANAGEMENT_REPORT';
-  
+  const isLeadFormSubfield = (resource) => resource.startsWith('LEAD_FORM_') && resource !== 'LEAD_FORM_CREATION';
   const isChatResource = (resource) =>
-    ['AGENT_TO_AGENT_CHAT', 'AGENT_TO_TEAM_LEAD_CHAT', 'TEAM_LEAD_ALL_CHAT', 'CREATE_GROUP_CHAT'].includes(resource);
-  
-  const isLeadFormSubfield = (resource) => 
-    resource.startsWith('LEAD_FORM_') && resource !== 'LEAD_FORM';
-  
-  const shouldShowAction = (action, resource) => {
-    // Show POST only for lead-related resources
-    if (action === 'POST') {
-      return isLeadResource(resource);
-    }
-    // Show CHAT only for chat-related resources
-    if (action === 'CHAT') {
-      return isChatResource(resource);
-    }
-    // Show MANAGE only for lead form sub-fields
-    if (action === 'MANAGE') {
-      return isLeadFormSubfield(resource);
-    }
-    // Show base actions for all resources
-    return baseActions.includes(action);
-  };
+    ['AGENT_TO_AGENT_CHAT', 'AGENT_TO_TEAM_LEAD_CHAT', 'TEAM_LEAD_ALL_CHAT'].includes(resource);
 
   if (loading) {
     return (
@@ -313,7 +314,7 @@ export default function OrganizationsPage() {
       {/* Organization Details Modal (for mobile) */}
       {selectedOrg && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[999]">
-          <div className="card w-full max-w-lg relative animate-fade-in">
+          <div className="card w-full max-w-lg relative animate-fade-in max-h-[90vh] overflow-y-auto">
             <button
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-700"
               onClick={() => { setSelectedOrg(null); setEditingOrg(false); }}
@@ -349,19 +350,46 @@ export default function OrganizationsPage() {
                   })()}
                 </div>
                 <div className="flex items-center gap-2 text-gray-700"><Info className="w-4 h-4" /> Status: <span className={`font-semibold ${selectedOrg.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-500'}`}>{selectedOrg.status}</span></div>
+                <div className="flex items-center justify-between gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <CreditCard className="w-4 h-4" />
+                    <span className="font-medium">Card Validation:</span>
+                    <span className={`font-semibold ${selectedOrg.enableCardValidation ? 'text-green-600' : 'text-gray-500'}`}>
+                      {selectedOrg.enableCardValidation ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedOrg.enableCardValidation || false}
+                      onChange={() => handleToggleCardValidation(selectedOrg.id, selectedOrg.enableCardValidation || false)}
+                      disabled={cardValidationLoading}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                  </label>
+                </div>
+                {cardValidationError && (
+                  <div className="text-red-500 text-sm mt-2">{cardValidationError}</div>
+                )}
+                {cardValidationSuccess && (
+                  <div className="text-green-600 text-sm mt-2">{cardValidationSuccess}</div>
+                )}
                 {/* Users List */}
                 {selectedOrg.users && selectedOrg.users.length > 0 && (
                   <div className="mt-4">
                     <div className="font-semibold mb-1 flex items-center gap-1"><Users className="w-4 h-4" /> Users in Organization:</div>
-                    <ul className="space-y-1">
-                      {selectedOrg.users.map(user => (
-                        <li key={user.id} className="pl-2 text-gray-700 text-sm flex flex-col md:flex-row md:items-center md:gap-2">
-                          <span>{user.firstName} {user.lastName}</span>
-                          <span className="text-gray-500">({user.email})</span>
-                          <span className="text-gray-400 text-xs">{user.role || user.roles?.[0]?.name}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-md p-2">
+                      <ul className="space-y-1">
+                        {selectedOrg.users.map(user => (
+                          <li key={user.id} className="pl-2 text-gray-700 text-sm flex flex-col md:flex-row md:items-center md:gap-2">
+                            <span>{user.firstName} {user.lastName}</span>
+                            <span className="text-gray-500">({user.email})</span>
+                            <span className="text-gray-400 text-xs">{user.role || user.roles?.[0]?.name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
                 )}
                 <div className="flex justify-end mt-4 gap-2">
@@ -394,40 +422,6 @@ export default function OrganizationsPage() {
             {orgAdminPermsError && <div className="text-red-500 mb-2">{orgAdminPermsError}</div>}
             {orgAdminPermsSuccess && <div className="text-green-600 mb-2">{orgAdminPermsSuccess}</div>}
             <form onSubmit={handleSaveOrgAdminPerms}>
-              {/* ALL Permissions Toggle */}
-              <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="accent-primary-600 w-5 h-5 rounded border-gray-300 focus:ring-primary-500"
-                    checked={allResources.every(resource => 
-                      allActions.filter(action => shouldShowAction(action, resource)).every(action =>
-                        orgAdminPerms.some(p => 
-                          String(p.action).trim() === String(action).trim() && 
-                          String(p.resource).trim() === String(resource).trim()
-                        )
-                      )
-                    )}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        // Select all permissions
-                        const newPerms = [];
-                        allResources.forEach(resource => {
-                          allActions.filter(action => shouldShowAction(action, resource)).forEach(action => {
-                            newPerms.push({ action, resource });
-                          });
-                        });
-                        setOrgAdminPerms(newPerms);
-                      } else {
-                        // Deselect all permissions
-                        setOrgAdminPerms([]);
-                      }
-                    }}
-                  />
-                  <span className="font-semibold text-blue-800">Select All Permissions</span>
-                </label>
-              </div>
-
               <div className="overflow-x-auto rounded-lg shadow border border-gray-200 bg-white">
                 <table className="w-full text-sm border-collapse">
                   <thead className="bg-primary-50">
@@ -443,11 +437,15 @@ export default function OrganizationsPage() {
                       <tr key={resource} className="hover:bg-primary-50 transition">
                         <td className="p-3 border-b font-semibold text-gray-800 whitespace-nowrap">{resource.replace(/_/g, ' ')}</td>
                         {allActions.map(action => {
-                          // Only show actions that should be displayed for this resource
-                          if (!shouldShowAction(action, resource)) {
+                          // Only show MANAGE for LEAD_FORM_* subfields (except LEAD_FORM_CREATION)
+                          if (isLeadFormSubfield(resource) && action !== 'MANAGE') {
                             return <td key={action} className="p-3 border-b text-center"></td>;
                           }
-                          
+                          // Only show CHAT for chat resources
+                          if (isChatResource(resource) && action !== 'CHAT') {
+                            return <td key={action} className="p-3 border-b text-center"></td>;
+                          }
+                          // For all other resources, show all actions
                           return (
                             <td key={action} className="p-3 border-b text-center">
                               <input
@@ -465,6 +463,28 @@ export default function OrganizationsPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+              {/* Chat Permissions Section in Modal */}
+              <div className="mt-6">
+                <div className="font-semibold mb-2">Chat Permissions</div>
+                <div className="space-y-2">
+                  {allPermissions.filter(p => p.resource.startsWith('CHAT_')).map(perm => {
+                    const checked = orgAdminPerms.some(
+                      p => String(p.action).trim() === "CHAT" && String(p.resource).trim() === String(perm.resource).trim()
+                    );
+                    return (
+                      <label key={perm.resource} className="flex items-center gap-2 bg-white rounded px-2 py-1 shadow-sm border border-gray-200 hover:border-primary-400 transition">
+                        <input
+                          type="checkbox"
+                          className="accent-primary-600 w-4 h-4 rounded border-gray-300 focus:ring-primary-500"
+                          checked={checked}
+                          onChange={() => handlePermCheckbox("CHAT", perm.resource)}
+                        />
+                        <span className="text-gray-800">{perm.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
               <div className="flex justify-end gap-2 mt-6">
                 <button type="button" className="btn-secondary" onClick={() => setShowOrgAdminPerms(false)}>Cancel</button>
@@ -521,6 +541,7 @@ export default function OrganizationsPage() {
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Website</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Card Validation</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Users</th>
@@ -530,7 +551,7 @@ export default function OrganizationsPage() {
           <tbody className="bg-white divide-y divide-gray-200">
             {organizations.length === 0 ? (
               <tr>
-                <td colSpan="9" className="px-4 py-12 text-center text-gray-500">
+                <td colSpan="10" className="px-4 py-12 text-center text-gray-500">
                   <Building2 className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                   <p>No organizations found</p>
                 </td>
@@ -553,6 +574,11 @@ export default function OrganizationsPage() {
                     </td>
                     <td className="px-4 py-4 max-w-[90px] overflow-hidden text-ellipsis whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${org.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : org.status === 'SUSPENDED' ? 'bg-red-100 text-red-800' : org.status === 'TRIAL' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>{org.status}</span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-gray-700 max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${org.enableCardValidation ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                        {org.enableCardValidation ? 'Enabled' : 'Disabled'}
+                      </span>
                     </td>
                     <td className="px-4 py-4 text-sm text-gray-500 max-w-[110px] overflow-hidden text-ellipsis whitespace-nowrap">
                       {new Date(org.createdAt).toLocaleDateString()}

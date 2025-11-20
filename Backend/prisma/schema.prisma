@@ -17,6 +17,7 @@ model Organization {
   website               String?
   currency              String?
   language              String?
+  enableCardValidation  Boolean                 @default(false)
   isActive              Boolean                 @default(true)
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt

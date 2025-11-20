@@ -6,10 +6,10 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
-  withCredentials: true, // Enable credentials for CORS
+  withCredentials: true,
 });
 
-// Add auth token to requests
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("superadmin_token");
   if (token) {
@@ -60,6 +60,8 @@ export const organizationsAPI = {
     api.put(`/api/super-admin/organizations/${organizationId}/org-admin-permissions`, { permissions }),
   getOrgAdminPermissions: (organizationId) =>
     api.get(`/api/super-admin/organizations/${organizationId}/org-admin-permissions`),
+  updateCardValidation: (organizationId, enableCardValidation) =>
+    api.patch(`/api/super-admin/organizations/${organizationId}/card-validation`, { enableCardValidation }),
 };
 
 // Audit Logs API
