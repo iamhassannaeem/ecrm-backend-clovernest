@@ -12,6 +12,7 @@ class NotificationService {
       // Build metadata object
       const metadata = {
         senderId,
+        senderName: `${sender.firstName} ${sender.lastName || ''}`.trim(),
         conversationId: conversationId.toString(), // Convert BigInt to string
         messagePreview: messageContent.substring(0, 50)
       };
@@ -40,6 +41,19 @@ class NotificationService {
           metadata: metadata
         }
       });
+
+      if (global.io) {
+        global.io.to(`user_${recipientId}`).emit('newNotification', {
+          notification: {
+            id: notification.id,
+            type: notification.type,
+            title: notification.title,
+            message: notification.message,
+            createdAt: notification.createdAt,
+            metadata: notification.metadata
+          }
+        });
+      }
 
       return notification;
     } catch (error) {

@@ -610,7 +610,9 @@ module.exports = function(io) {
         
         for (const participant of otherParticipants) {
           const participantSocket = activeConnections.get(participant.userId);
-          if (participantSocket && !participantSocket.rooms.has(`conversation_${conversationId}`)) {
+          const isInConversation = participantSocket && participantSocket.rooms.has(`conversation_${conversationId}`);
+          
+          if (participantSocket && !isInConversation) {
             participantSocket.emit('newMessageNotification', {
               conversationId: conversationId.toString(),
               senderId: userId,
@@ -618,6 +620,14 @@ module.exports = function(io) {
               content: content.length > 50 ? content.substring(0, 50) + '...' : content,
               timestamp: new Date()
             });
+            
+            await createChatMessageNotification(
+              userId,
+              participant.userId,
+              conversationId,
+              content,
+              conversation.organizationId
+            );
             console.log(`[Socket.IO]  PUSH NOTIFICATION SENT - To online user ${participant.userId} (not in conversation)`);
           }
         }
@@ -751,14 +761,11 @@ module.exports = function(io) {
         };
 
         console.log(`[Socket.IO] 📤 BROADCASTING ATTACHMENT - Broadcasting to conversation ${conversationId}`);
-
-        // Broadcast to all participants in the conversation
         io.to(`conversation_${conversationId}`).emit('newMessage', messageData);
         
         const broadcastTime = Date.now() - startTime;
         console.log(`[Socket.IO]  ATTACHMENT BROADCASTED - Time: ${broadcastTime}ms`);
 
-        // Send delivery confirmation to sender
         socket.emit('attachmentDelivered', {
           messageId: message.id,
           attachmentId: attachment.id,
@@ -768,17 +775,14 @@ module.exports = function(io) {
 
         console.log(`[Socket.IO]  DELIVERY CONFIRMATION SENT - To sender ${userId}`);
 
-        // Update unread count
         await updateUnreadCount(conversationId);
 
-        // Handle notifications for offline users
         const otherParticipants = conversation.participants.filter(p => p.userId !== userId);
         
         for (const participant of otherParticipants) {
           const isOnline = activeConnections.has(participant.userId);
           
           if (!isOnline) {
-            // Pass attachment information to notification
             await createChatMessageNotification(
               userId,
               participant.userId,
@@ -819,6 +823,52 @@ module.exports = function(io) {
         const errorTime = Date.now() - startTime;
         console.error(`[Socket.IO]  ERROR in uploadAttachment after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to upload attachment' });
+      }
+    });
+
+    socket.on('buzz', async ({ conversationId, targetUserId }) => {
+      try {
+        if (!conversationId || !targetUserId) {
+          socket.emit('error', { message: 'Conversation ID and target user ID are required' });
+          return;
+        }
+
+        const conversation = await prisma.chatSession.findUnique({
+          where: { id: conversationId },
+          include: { participants: true }
+        });
+
+        if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
+          socket.emit('error', { message: 'Not a participant in this conversation' });
+          return;
+        }
+
+        const sender = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { firstName: true, lastName: true }
+        });
+
+        const targetSocket = activeConnections.get(targetUserId);
+        if (targetSocket) {
+          targetSocket.emit('buzzReceived', {
+            conversationId: conversationId.toString(),
+            senderId: userId,
+            senderName: `${sender.firstName} ${sender.lastName || ''}`.trim(),
+            timestamp: new Date()
+          });
+        }
+
+        const notification = await createChatMessageNotification(
+          userId,
+          targetUserId,
+          conversationId,
+          '🔔 Buzz!',
+          conversation.organizationId
+        );
+
+      } catch (error) {
+        console.error(`[Socket.IO] ERROR in buzz:`, error);
+        socket.emit('error', { message: 'Failed to send buzz' });
       }
     });
 
