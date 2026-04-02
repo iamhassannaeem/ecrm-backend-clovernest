@@ -21,6 +21,8 @@ pids
 *.seed
 *.pid.lock
 
+
+Backend/firebase-service-account.json
 # Coverage directory used by tools like istanbul
 coverage/
 *.lcov
