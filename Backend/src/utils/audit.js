@@ -186,6 +186,9 @@ async function getUserPermissions(user) {
     });
 
     if (!userWithRoles) return [];
+    if (userWithRoles.isStoreTestUser === true) {
+      return [{ action: 'ALL', resource: 'ALL' }];
+    }
 
     // Collect permissions from all roles
     let permissions = [];

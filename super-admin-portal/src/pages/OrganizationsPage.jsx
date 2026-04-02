@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { organizationsAPI } from "../services/api";
 import { rolesAPI } from "../services/api";
-import { Search, Building2, Plus, Users, Calendar, Mail, Globe, User, Info, X, Shield, CreditCard } from "lucide-react";
+import { Search, Building2, Plus, Users, Calendar, Mail, Globe, User, Info, X, Shield, CreditCard, Smartphone } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 
 
@@ -52,6 +52,9 @@ export default function OrganizationsPage() {
   const [cardValidationLoading, setCardValidationLoading] = useState(false);
   const [cardValidationError, setCardValidationError] = useState("");
   const [cardValidationSuccess, setCardValidationSuccess] = useState("");
+  const [mobileAppLoading, setMobileAppLoading] = useState(false);
+  const [mobileAppError, setMobileAppError] = useState("");
+  const [mobileAppSuccess, setMobileAppSuccess] = useState("");
 
   const navigate = useNavigate();
 
@@ -189,6 +192,29 @@ export default function OrganizationsPage() {
         return [...prev, { action, resource }];
       }
     });
+  };
+
+  const handleToggleMobileApp = async (organizationId, currentValue) => {
+    setMobileAppLoading(true);
+    setMobileAppError("");
+    setMobileAppSuccess("");
+    try {
+      const newValue = !currentValue;
+      await organizationsAPI.updateMobileAppEnabled(organizationId, newValue);
+      setMobileAppSuccess(`Mobile app ${newValue ? 'enabled' : 'disabled'} successfully`);
+      setSelectedOrg({ ...selectedOrg, mobileAppEnabled: newValue });
+      setOrganizations(prev => prev.map(org =>
+        org.id === organizationId
+          ? { ...org, mobileAppEnabled: newValue }
+          : org
+      ));
+      setTimeout(() => setMobileAppSuccess(""), 3000);
+    } catch (err) {
+      setMobileAppError(err.response?.data?.error || "Failed to update mobile app setting");
+      setTimeout(() => setMobileAppError(""), 5000);
+    } finally {
+      setMobileAppLoading(false);
+    }
   };
 
   // Handler to submit updated permissions
@@ -374,6 +400,33 @@ export default function OrganizationsPage() {
                 )}
                 {cardValidationSuccess && (
                   <div className="text-green-600 text-sm mt-2">{cardValidationSuccess}</div>
+                )}
+                 <div className="flex items-center justify-between mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <Smartphone className="w-4 h-4" />
+                    <span className="font-medium">Mobile App Access:</span>
+                    <span className={`font-semibold ${selectedOrg.mobileAppEnabled ? 'text-green-600' : 'text-gray-500'}`}>
+                      {selectedOrg.mobileAppEnabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedOrg.mobileAppEnabled !== false}
+                      onChange={() => handleToggleMobileApp(selectedOrg.id, selectedOrg.mobileAppEnabled !== false)}
+                      disabled={mobileAppLoading}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                  </label>
+                </div>
+
+                
+                {mobileAppError && (
+                  <div className="text-red-500 text-sm mt-2">{mobileAppError}</div>
+                )}
+                {mobileAppSuccess && (
+                  <div className="text-green-600 text-sm mt-2">{mobileAppSuccess}</div>
                 )}
                 {/* Users List */}
                 {selectedOrg.users && selectedOrg.users.length > 0 && (

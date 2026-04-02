@@ -14,9 +14,13 @@ model Organization {
   domain                String                  @unique
   description           String?
   logo                  String?
+  allowedIps            String[]                   @default([]) @map("allowed_ips")
+  allowedIpLabels       Json                      @default(dbgenerated("'{}'::jsonb")) @map("allowed_ip_labels")
+  mobileAppEnabled      Boolean                    @default(true) @map("mobile_app_enabled")
   website               String?
   currency              String?
   language              String?
+  chatDisplayMode       ChatDisplayMode         @default(FULLSCREEN)
   enableCardValidation  Boolean                 @default(false)
   isActive              Boolean                 @default(true)
   createdAt             DateTime                @default(now())
@@ -27,6 +31,7 @@ model Organization {
   chatSessions          ChatSession[]
   groupChats            GroupChat[]
   groupChatMessages     GroupChatMessage[]
+  groupChatAdmins           GroupChatAdmin[]
   groupChatParticipants GroupChatParticipant[]
   leads                 Lead[]
   leadPackageTypes      LeadPackageType[]
@@ -43,8 +48,37 @@ model Organization {
   rolePermissions       RolePermission[]
   roles                 Role[]
   users                 User[]
+  mobileDevices             MobileDevice[]
 
   @@map("organizations")
+}
+
+enum ChatDisplayMode {
+  FULLSCREEN
+  CHATBOX
+}
+
+model MobileDevice {
+  id             Int       @id @default(autoincrement())
+  organizationId Int       @map("org_id")
+  userId         Int       @map("user_id")
+  deviceId       String    @unique @map("device_id")
+  deviceName     String    @map("device_name")
+  platform       String    @map("platform")
+  isApproved     Boolean   @default(false) @map("is_approved")
+  allowedIps     String[]  @default([]) @map("allowed_ips")
+  applyOrgIps    Boolean   @default(false) @map("apply_org_ips")
+  applyUserIps   Boolean   @default(false) @map("apply_user_ips")
+  lastIp         String?   @map("last_ip")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  approvedAt     DateTime? @map("approved_at")
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("mobile_devices")
 }
 
 model User {
@@ -56,19 +90,31 @@ model User {
   phoneNumber           String?
   avatar                String?
   isActive              Boolean                @default(true)
+  isDeleted             Boolean                @default(false) @map("is_deleted")
+  deletedAt             DateTime?              @map("deleted_at")
+  deletedBy             Int?                   @map("deleted_by")
+  reportToId            Int?                   @map("report_to_id")
+  isStoreTestUser       Boolean                    @default(false) @map("is_store_test_user")
   lastLoginAt           DateTime?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   organizationId        Int?
   bio                   String?
+  allowedIps            String[]                   @default([]) @map("allowed_ips")
+  allowedIpLabels       Json                      @default(dbgenerated("'{}'::jsonb")) @map("allowed_ip_labels")
   isOnline              Boolean                @default(false)
   lastSeen              DateTime               @default(now())
   onlineStatusUpdatedAt DateTime               @default(now())
   extension             String?
+  reportTo              User?                  @relation("UserReportsTo", fields: [reportToId], references: [id])
+  directReports         User[]                 @relation("UserReportsTo")
   chatParticipants      ChatParticipant[]
-  groupChatsAsAdmin     GroupChat[]            @relation("GroupChatAdmin")
+  fcmDeviceTokens           FcmDeviceToken[]
+  groupChatsAsAdmin         GroupChat[]                @relation("GroupChatAdmin")
+  groupChatAdmins           GroupChatAdmin[]           @relation("GroupChatAdmins")
   groupChatMessages     GroupChatMessage[]     @relation("GroupChatMessageSender")
   groupChatParticipants GroupChatParticipant[]
+  mobileDevices             MobileDevice[]
   leadsAssigned         Lead[]                 @relation("LeadAssignedTo")
   leadsCreated          Lead[]                 @relation("LeadCreatedBy")
   messages              Message[]              @relation("MessageSender")
@@ -270,12 +316,14 @@ model GroupChat {
   adminId        Int
   isActive       Boolean                @default(true)
   createdAt      DateTime               @default(now())
+  allowBuzz      Boolean                @default(true)
   updatedAt      DateTime               @updatedAt
   lastMessageAt  DateTime?
   admin          User                   @relation("GroupChatAdmin", fields: [adminId], references: [id], onDelete: Cascade)
   organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   messages       GroupChatMessage[]
   participants   GroupChatParticipant[]
+  groupAdmins    GroupChatAdmin[]
 }
 
 model GroupChatParticipant {
@@ -306,6 +354,20 @@ model GroupChatMessage {
   groupChat      GroupChat    @relation(fields: [groupChatId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sender         User         @relation("GroupChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+model GroupChatAdmin {
+  id             Int          @id @default(autoincrement())
+  userId         Int
+  groupChatId    BigInt
+  organizationId Int
+  createdAt      DateTime     @default(now())
+  createdBy      Int?         // User who made this user an admin
+  groupChat      GroupChat    @relation(fields: [groupChatId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation("GroupChatAdmins", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupChatId])
 }
 
 model Security {
@@ -520,4 +582,36 @@ enum NotificationType {
   TASK_ASSIGNED
   REMINDER
   NEW_GROUP_MESSAGE
+}
+
+model FcmDeviceToken {
+  id             Int       @id @default(autoincrement())
+  token          String    @unique
+  userId         Int
+  organizationId Int?
+  platform       String?
+  appVersion     String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  lastSeenAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, organizationId, isActive])
+  @@map("fcm_device_tokens")
+}
+
+model FcmNotificationDelivery {
+  id              Int       @id @default(autoincrement())
+  notificationId Int       @unique
+  recipientId    Int
+  attempts       Int       @default(0)
+  lastAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  lastError      String?
+
+  @@index([recipientId])
+  @@map("fcm_notification_deliveries")
 }

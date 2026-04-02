@@ -16,7 +16,9 @@ router.get('/conversations', authenticateToken, chatController.getUserConversati
 
 // Get messages for a conversation
 router.get('/conversations/:conversationId/messages', authenticateToken, chatController.getMessages);
+router.get('/conversations/:conversationId/messages/search', authenticateToken, chatController.searchMessages);
 router.get('/session/:conversationId/messages', authenticateToken, chatController.getMessages); // Alias for compatibility
+router.get('/session/:conversationId/messages/search', authenticateToken, chatController.searchMessages); // Alias for compatibility
 
 // Send a message in a conversation
 router.post('/conversations/:conversationId/messages', authenticateToken, chatController.sendMessage);
@@ -43,9 +45,13 @@ router.get('/groups/:id/participants', authenticateToken, groupChatController.ge
 router.post('/groups/:id/participants/add', authenticateToken, groupChatController.addParticipants);
 router.post('/groups/:id/participants/remove', authenticateToken, groupChatController.removeParticipants);
 router.get('/groups/:id/messages', authenticateToken, groupChatController.getGroupChatMessages);
+router.get('/groups/:id/messages/search', authenticateToken, groupChatController.searchGroupChatMessages);
 router.post('/groups/:id/message', authenticateToken, groupChatController.sendGroupChatMessage);
 
 // Leave group chat
 router.post('/groups/:id/leave', authenticateToken, groupChatController.leaveGroupChat);
+
+// Update group admins (add/remove)
+router.post('/groups/:id/admins', authenticateToken, groupChatController.updateGroupAdmins);
 
 module.exports = router; 

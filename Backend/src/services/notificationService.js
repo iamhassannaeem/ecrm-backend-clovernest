@@ -1,31 +1,68 @@
 const { prisma } = require('../config/database');
+const { sendChatPush } = require('./firebase/fcmNotificationService');
 
 class NotificationService {
-  // Create a notification for a new chat message
   static async createChatNotification(senderId, recipientId, conversationId, messageContent, organizationId, attachmentInfo = null) {
     try {
+      // Check for duplicate notification within the last 5 seconds
+      const fiveSecondsAgo = new Date(Date.now() - 5000);
+      const existingNotification = await prisma.notification.findFirst({
+        where: {
+          type: 'NEW_MESSAGE',
+          recipientId,
+          organizationId,
+          createdAt: {
+            gte: fiveSecondsAgo
+          },
+          metadata: {
+            path: ['conversationId'],
+            equals: conversationId.toString()
+          }
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      });
+
+      // If duplicate exists, return it instead of creating a new one
+      if (existingNotification) {
+        console.log(`[NotificationService] Duplicate notification prevented for conversation ${conversationId}, recipient ${recipientId}`);
+        if (global.io) {
+          global.io.to(`user_${recipientId}`).emit('newNotification', {
+            notification: {
+              id: existingNotification.id,
+              type: existingNotification.type,
+              title: existingNotification.title,
+              message: existingNotification.message,
+              createdAt: existingNotification.createdAt,
+              metadata: existingNotification.metadata
+            }
+          });
+        }
+        return existingNotification;
+      }
+
       const sender = await prisma.user.findUnique({
         where: { id: senderId },
         select: { firstName: true, lastName: true }
       });
 
-      // Build metadata object
+    
       const metadata = {
         senderId,
         senderName: `${sender.firstName} ${sender.lastName || ''}`.trim(),
-        conversationId: conversationId.toString(), // Convert BigInt to string
+        conversationId: conversationId.toString(), 
         messagePreview: messageContent.substring(0, 50)
       };
 
-      // Add attachment information if present
       if (attachmentInfo) {
         metadata.hasAttachment = true;
         metadata.attachment = {
           id: attachmentInfo.id,
           fileName: attachmentInfo.fileName,
           mimeType: attachmentInfo.mimeType,
-          size: attachmentInfo.size.toString(), // Convert BigInt to string
-          fileType: attachmentInfo.mimeType.split('/')[0] // e.g., 'image', 'application', 'text'
+          size: attachmentInfo.size.toString(),
+          fileType: attachmentInfo.mimeType.split('/')[0] 
         };
       } else {
         metadata.hasAttachment = false;
@@ -40,6 +77,11 @@ class NotificationService {
           organizationId,
           metadata: metadata
         }
+      });
+
+      // Mobile push (FCM) - do not block socket/web behavior
+      sendChatPush({ notification }).catch((err) => {
+        console.error('[FCM] createChatNotification sendChatPush error:', err);
       });
 
       if (global.io) {
@@ -62,7 +104,6 @@ class NotificationService {
     }
   }
 
-  // Create a notification for a new group chat message
   static async createGroupChatNotification(senderId, recipientId, groupId, messageContent, organizationId, attachmentInfo = null) {
     try {
       const sender = await prisma.user.findUnique({
@@ -75,7 +116,7 @@ class NotificationService {
         select: { name: true }
       });
 
-      // Build metadata object
+    
       const metadata = {
         senderId,
         groupId: groupId.toString(),
@@ -83,15 +124,15 @@ class NotificationService {
         groupName: group.name
       };
 
-      // Add attachment information if present
+     
       if (attachmentInfo) {
         metadata.hasAttachment = true;
         metadata.attachment = {
           id: attachmentInfo.id,
           fileName: attachmentInfo.fileName,
           mimeType: attachmentInfo.mimeType,
-          size: attachmentInfo.size.toString(), // Convert BigInt to string
-          fileType: attachmentInfo.mimeType.split('/')[0] // e.g., 'image', 'application', 'text'
+          size: attachmentInfo.size.toString(), 
+          fileType: attachmentInfo.mimeType.split('/')[0] 
         };
       } else {
         metadata.hasAttachment = false;
@@ -108,6 +149,11 @@ class NotificationService {
         }
       });
 
+      // Mobile push (FCM) - do not block socket/web behavior
+      sendChatPush({ notification }).catch((err) => {
+        console.error('[FCM] createGroupChatNotification sendChatPush error:', err);
+      });
+
       return notification;
     } catch (error) {
       console.error('Error creating group chat notification:', error);
@@ -115,8 +161,7 @@ class NotificationService {
     }
   }
 
-  // Create a notification for lead assignment
-  static async createLeadAssignmentNotification(leadId, assignedToId, assignedById, organizationId) {
+  static async createLeadAssignmentNotification(leadId, assignedToId, assignedById, organizationId, options = {}) {
     try {
       const [lead, assignedTo, assignedBy] = await Promise.all([
         prisma.lead.findUnique({
@@ -134,23 +179,31 @@ class NotificationService {
       ]);
 
       const customerName = `${lead.firstName} ${lead.lastName}`.trim();
+      const isRoleBased = options.isRoleBased || false;
+      
+      const message = isRoleBased
+        ? `Lead for ${customerName} (${lead.email}) has been assigned to your role. Click to proceed and claim this lead.`
+        : `Lead for ${customerName} (${lead.email}) has been assigned to you by ${assignedBy.firstName} ${assignedBy.lastName || ''}`.trim();
+      
       const notification = await prisma.notification.create({
         data: {
           type: 'LEAD_ASSIGNED',
-          title: 'New Lead Assigned',
-          message: `Lead for ${customerName} (${lead.email}) has been assigned to you by ${assignedBy.firstName} ${assignedBy.lastName || ''}`.trim(),
+          title: isRoleBased ? 'New Lead Available ' : 'New Lead Assigned',
+          message: message,
           recipientId: assignedToId,
           organizationId,
           metadata: {
             leadId,
             assignedById,
             customerName: customerName,
-            customerEmail: lead.email
+            customerEmail: lead.email,
+            isRoleBased: isRoleBased,
+            requiresProceed: options.requiresProceed || false,
+            allAssignedUserIds: options.allAssignedUserIds || []
           }
         }
       });
 
-      // Emit notification via socket for real-time delivery
       if (global.io) {
         global.io.to(`user_${assignedToId}`).emit('newNotification', {
           notification: {
@@ -174,7 +227,155 @@ class NotificationService {
     }
   }
 
-  // Create a notification for lead status change
+  static async createQARecordingAssignmentNotification(recordingIds, assignedToId, assignedById, organizationId) {
+    try {
+      const [assignedTo, assignedBy, recordings] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: assignedToId },
+          select: { firstName: true, lastName: true }
+        }),
+        prisma.user.findUnique({
+          where: { id: assignedById },
+          select: { firstName: true, lastName: true }
+        }),
+        prisma.qARecording.findMany({
+          where: { id: { in: recordingIds.map(id => parseInt(id)) } },
+          include: {
+            lead: {
+              select: { firstName: true, lastName: true, email: true }
+            }
+          }
+        })
+      ]);
+
+      if (!assignedTo || !assignedBy) {
+        throw new Error('User not found');
+      }
+
+      const recordingCount = recordings.length;
+      const leadNames = recordings
+        .map(rec => rec.lead ? `${rec.lead.firstName} ${rec.lead.lastName}`.trim() : 'Unknown')
+        .filter((name, index, self) => self.indexOf(name) === index)
+        .slice(0, 3);
+
+      const leadNamesText = leadNames.length > 0 
+        ? leadNames.join(', ') + (recordings.length > 3 ? ' and more' : '')
+        : 'recordings';
+
+      const message = recordingCount === 1
+        ? `QA recording for ${leadNames[0] || 'a lead'} has been assigned to you by ${assignedBy.firstName} ${assignedBy.lastName || ''}`.trim()
+        : `${recordingCount} QA recording(s) for ${leadNamesText} have been assigned to you by ${assignedBy.firstName} ${assignedBy.lastName || ''}`.trim();
+
+      const notification = await prisma.notification.create({
+        data: {
+          type: 'QA_RECORDING_ASSIGNED',
+          title: recordingCount === 1 ? 'New lead for QA validation received' : 'New leads for QA validation received',
+          message: message,
+          recipientId: assignedToId,
+          organizationId,
+          metadata: {
+            recordingIds: recordingIds,
+            assignedById,
+            recordingCount,
+            leadNames: leadNames
+          }
+        }
+      });
+
+      if (global.io) {
+        global.io.to(`user_${assignedToId}`).emit('newNotification', {
+          notification: {
+            id: notification.id,
+            type: notification.type,
+            title: notification.title,
+            message: notification.message,
+            createdAt: notification.createdAt,
+            metadata: notification.metadata
+          }
+        });
+        console.log(`[NotificationService] QA recording assignment notification sent via socket to user ${assignedToId}`);
+      } else {
+        console.warn('[NotificationService] Socket.IO instance not available for QA recording assignment notification');
+      }
+
+      return notification;
+    } catch (error) {
+      console.error('Error creating QA recording assignment notification:', error);
+      throw error;
+    }
+  }
+
+  static async createQAReevaluationNotification(recordingId, evaluatedById, reassignedById, organizationId, comment) {
+    try {
+      const [evaluatedBy, reassignedBy, recording] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: evaluatedById },
+          select: { firstName: true, lastName: true }
+        }),
+        prisma.user.findUnique({
+          where: { id: reassignedById },
+          select: { firstName: true, lastName: true }
+        }),
+        prisma.qARecording.findUnique({
+          where: { id: recordingId },
+          include: {
+            lead: {
+              select: { id: true, firstName: true, lastName: true }
+            }
+          }
+        })
+      ]);
+
+      if (!evaluatedBy || !reassignedBy) {
+        throw new Error('User not found');
+      }
+
+      const leadName = recording?.lead 
+        ? `${recording.lead.firstName} ${recording.lead.lastName}`.trim()
+        : 'a lead';
+
+      const message = `Your evaluation failed. ${comment ? `Comment: ${comment}` : 'Please read the comment and reevaluate.'}`;
+
+      const notification = await prisma.notification.create({
+        data: {
+          type: 'QA_EVALUATION_REJECTED',
+          title: 'QA Evaluation Rejected - Reevaluation Required',
+          message: message,
+          recipientId: evaluatedById,
+          organizationId,
+          metadata: {
+            recordingId,
+            leadId: recording?.lead?.id || null,
+            reassignedById,
+            comment,
+            leadName
+          }
+        }
+      });
+
+      if (global.io) {
+        global.io.to(`user_${evaluatedById}`).emit('newNotification', {
+          notification: {
+            id: notification.id,
+            type: notification.type,
+            title: notification.title,
+            message: notification.message,
+            createdAt: notification.createdAt,
+            metadata: notification.metadata
+          }
+        });
+        console.log(`[NotificationService] QA reevaluation notification sent via socket to user ${evaluatedById}`);
+      } else {
+        console.warn('[NotificationService] Socket.IO instance not available for QA reevaluation notification');
+      }
+
+      return notification;
+    } catch (error) {
+      console.error('Error creating QA reevaluation notification:', error);
+      throw error;
+    }
+  }
+
   static async createLeadStatusNotification(leadId, oldStatus, newStatus, updatedById, organizationId) {
     try {
       const [lead, updatedBy] = await Promise.all([
@@ -206,7 +407,6 @@ class NotificationService {
         }
       });
 
-      // Emit notification via socket for real-time delivery
       if (global.io && lead.assignedToId) {
         global.io.to(`user_${lead.assignedToId}`).emit('newNotification', {
           notification: {
@@ -230,7 +430,6 @@ class NotificationService {
     }
   }
 
-  // Create a notification for new lead creation
   static async createNewLeadNotification(leadId, createdById, organizationId) {
     try {
       const [lead, createdBy] = await Promise.all([
@@ -244,7 +443,6 @@ class NotificationService {
         })
       ]);
 
-      // Notify the assigned user
       if (lead.assignedToId && lead.assignedToId !== createdById) {
         const customerName = `${lead.firstName} ${lead.lastName}`.trim();
         const notification = await prisma.notification.create({
@@ -263,7 +461,6 @@ class NotificationService {
           }
         });
 
-        // Emit notification via socket for real-time delivery
         if (global.io) {
           global.io.to(`user_${lead.assignedToId}`).emit('newNotification', {
             notification: {
@@ -288,7 +485,6 @@ class NotificationService {
     }
   }
 
-  // Get unread notifications for a user
   static async getUnreadNotifications(userId, organizationId, limit = 20) {
     try {
       const notifications = await prisma.notification.findMany({
@@ -309,7 +505,6 @@ class NotificationService {
     }
   }
 
-  // Mark notifications as read
   static async markNotificationsAsRead(userId, notificationIds) {
     try {
       const result = await prisma.notification.updateMany({
@@ -330,7 +525,6 @@ class NotificationService {
     }
   }
 
-  // Mark all notifications as read for a user
   static async markAllNotificationsAsRead(userId, organizationId) {
     try {
       const result = await prisma.notification.updateMany({
@@ -352,7 +546,7 @@ class NotificationService {
     }
   }
 
-  // Delete a notification
+
   static async deleteNotification(userId, notificationId) {
     try {
       const result = await prisma.notification.update({
@@ -373,7 +567,7 @@ class NotificationService {
     }
   }
 
-  // Get notification count for a user
+
   static async getNotificationCount(userId, organizationId) {
     try {
       const count = await prisma.notification.count({
@@ -392,11 +586,9 @@ class NotificationService {
     }
   }
 
-  // Broadcast notification to all online users in an organization
   static async broadcastToOrganization(organizationId, notificationData) {
     try {
-      // This would be called from socket.io to broadcast to all online users
-      // The actual broadcasting is handled in socket.js
+
       console.log(`Broadcasting notification to organization ${organizationId}:`, notificationData);
       return true;
     } catch (error) {
@@ -405,7 +597,6 @@ class NotificationService {
     }
   }
 
-  // Get recent notifications for a user
   static async getRecentNotifications(userId, organizationId, limit = 50) {
     try {
       const notifications = await prisma.notification.findMany({

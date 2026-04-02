@@ -17,6 +17,113 @@ router.get('/analytics', requireSystemPermission('READ', 'PLATFORM_ANALYTICS'), 
 
 router.get('/users', requireSystemPermission('READ', 'PLATFORM_USERS'), getUsers);
 
+router.post(
+  '/store-test-users',
+  requireSystemPermission('CREATE', 'PLATFORM_USERS'),
+  [
+    body('organizationId').isInt().withMessage('organizationId is required'),
+    body('email').isEmail().withMessage('Valid email is required'),
+    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+    body('firstName').optional().trim().isLength({ max: 50 }),
+    body('lastName').optional().trim().isLength({ max: 50 }),
+  ],
+  async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+      }
+
+      const organizationId = Number(req.body.organizationId);
+      const email = String(req.body.email).trim();
+      const password = String(req.body.password);
+      const firstName = req.body.firstName != null ? String(req.body.firstName).trim() : null;
+      const lastName = req.body.lastName != null ? String(req.body.lastName).trim() : null;
+
+      const organization = await prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { id: true, name: true, isActive: true },
+      });
+      if (!organization) {
+        return res.status(404).json({ error: 'Organization not found' });
+      }
+      if (organization.isActive === false) {
+        return res.status(400).json({ error: 'Organization is inactive' });
+      }
+
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          organizationId: organizationId,
+        },
+        select: { id: true },
+      });
+      if (existingUser) {
+        return res.status(409).json({ error: 'User already exists in this organization' });
+      }
+
+      const hashedPassword = await hashPassword(password);
+
+      const created = await prisma.$transaction(async (tx) => {
+        // Ensure USER role exists for this org
+        let userRole = await tx.role.findFirst({
+          where: { organizationId, name: 'USER' },
+          select: { id: true },
+        });
+        if (!userRole) {
+          userRole = await tx.role.create({
+            data: { organizationId, name: 'USER', description: 'Default user role' },
+            select: { id: true },
+          });
+        }
+
+        const user = await tx.user.create({
+          data: {
+            email,
+            password: hashedPassword,
+            firstName,
+            lastName,
+            isActive: true,
+            organizationId,
+            isStoreTestUser: true,
+            roles: { connect: [{ id: userRole.id }] },
+          },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            isActive: true,
+            isStoreTestUser: true,
+            organizationId: true,
+            createdAt: true,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'CREATE_STORE_TEST_USER',
+            resource: 'USER',
+            resourceId: user.id,
+            newValues: { organizationId, email, isStoreTestUser: true },
+            userId: req.user.id,
+            organizationId,
+          },
+        });
+
+        return user;
+      });
+
+      return res.status(201).json({
+        message: 'Store test user created successfully',
+        user: created,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
 router.post('/organizations', requireSystemPermission('CREATE', 'PLATFORM_ORGANIZATIONS'), [
   body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Organization name is required and must be between 1-100 characters'),
   body('domain').optional().trim(),
@@ -122,6 +229,40 @@ router.patch('/organizations/:organizationId/card-validation', requireSystemPerm
     res.json({ 
       message: 'Card validation setting updated successfully', 
       organization 
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/organizations/:organizationId/mobile-app', requireSystemPermission('MANAGE', 'PLATFORM_ORGANIZATIONS'), async (req, res, next) => {
+  try {
+    const { organizationId } = req.params;
+    const { mobileAppEnabled } = req.body;
+
+    if (typeof mobileAppEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'mobileAppEnabled must be a boolean value' });
+    }
+
+    const organization = await prisma.organization.update({
+      where: { id: parseInt(organizationId, 10) },
+      data: { mobileAppEnabled },
+      select: { id: true, name: true, mobileAppEnabled: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'UPDATE_ORGANIZATION_MOBILE_APP',
+        resource: 'ORGANIZATION',
+        resourceId: parseInt(organizationId, 10),
+        newValues: { mobileAppEnabled },
+        userId: req.user.id,
+      },
+    });
+
+    res.json({
+      message: `Mobile app ${mobileAppEnabled ? 'enabled' : 'disabled'} successfully`,
+      organization,
     });
   } catch (error) {
     next(error);

@@ -2,6 +2,7 @@ const { prisma } = require('../config/database');
 const { hashPassword, comparePassword, validatePasswordStrength } = require('../utils/password');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken, revokeRefreshToken } = require('../utils/jwt');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/email');
+const { getClientIP, isIPAllowed } = require('../utils/accessControl');
 
 async function getUserPermissions(user) {
 
@@ -104,14 +105,9 @@ exports.register = async (req, res, next) => {
           slug: organization.slug,
           domain: organization.domain,
           description: organization.description,
-          logo: organization.logo,
-          website: organization.website,
-          currency: organization.currency,
-          language: organization.language,
-          isActive: organization.isActive,
+          status: organization.status,
           createdAt: organization.createdAt,
-          updatedAt: organization.updatedAt,
-          createdById: organization.createdById
+          updatedAt: organization.updatedAt
         }
       }
     });
@@ -128,6 +124,13 @@ exports.login = async (req, res, next) => {
     }
     
     const { email, password } = req.body;
+    const hasDeviceHeader = Object.prototype.hasOwnProperty.call(req.headers || {}, 'x-device-id');
+    const headerDeviceIdRaw = req.get('x-device-id');
+    const headerDeviceId = headerDeviceIdRaw != null ? String(headerDeviceIdRaw).trim() : null;
+    // If x-device-id header exists, it MUST be non-empty (mobile identification rule)
+    if (hasDeviceHeader && !headerDeviceId) {
+      return res.status(403).json({ code: 'ACCESS_DENIED', message: 'Unauthorized access' });
+    }
     
     // Extract domain from request
     const getDomainFromRequest = (req) => {
@@ -199,8 +202,7 @@ exports.login = async (req, res, next) => {
         message: `No organization found for domain: ${requestDomain}` 
       });
     }
-    
-    // First check if user exists with this email in ANY organization
+
     const userExists = await prisma.user.findFirst({
       where: { 
         email: {
@@ -208,61 +210,69 @@ exports.login = async (req, res, next) => {
           mode: 'insensitive'
         }
       },
-      select: {
-        id: true,
-        email: true,
-        organization: {
-          select: {
-            id: true,
-            name: true
-          }
-        }
-      }
-    });
-
-
-    const user = await prisma.user.findFirst({
-      where: { 
-        email: {
-          equals: email,
-          mode: 'insensitive'
-        },
-        organizationId: organization.id
-      },
       include: {
-        organization: true,
-        roles: {
-          include: {
-            rolePermissions: {
-              include: {
-                organization: {
-                  select: {
-                    id: true,
-                    name: true,
-                    slug: true,
-                  }
-                }
-              }
-            }
-          }
-        },
-        auditLogs: true,
-        refreshTokens: true,
-        leadsCreated: true,
-        leadsAssigned: true,
-        createdOrganizations: true,
-        chatParticipants: true,
-        messages: true
+        roles: true
       }
     });
 
-    if (!user || !user.password) {
-      if (userExists) {
-        return res.status(401).json({ 
-          error: 'Profile not found', 
-          message: `Your profile doesn't exist in this organization (${organization.name}). You are registered with ${userExists.organization.name}.` 
-        });
-      } else {
+    if (!userExists || !userExists.password) {
+      return res.status(401).json({ 
+        error: 'Invalid credentials', 
+        message: 'Invalid email or password' 
+      });
+    }
+
+    const isSuperAdmin =
+      userExists?.systemRole === 'SUPER_ADMIN' ||
+      (userExists.roles &&
+        userExists.roles.some(
+          (role) => role.name === 'SUPER_ADMIN' || role.name === 'Super Admin'
+        ));
+
+    let user;
+    if (isSuperAdmin) {
+      user = await prisma.user.findFirst({
+        where: { 
+          email: {
+            equals: email,
+            mode: 'insensitive'
+          }
+        },
+        include: {
+          organization: true,
+          roles: true,
+          auditLogs: true,
+          refreshTokens: true,
+          leadsCreated: true,
+          leadsAssigned: true,
+          createdOrganizations: true,
+          chatParticipants: true,
+          messages: true
+        }
+      });
+    } else {
+      user = await prisma.user.findFirst({
+        where: { 
+          email: {
+            equals: email,
+            mode: 'insensitive'
+          },
+          organizationId: organization.id
+        },
+        include: {
+          organization: true,
+          roles: true,
+          auditLogs: true,
+          refreshTokens: true,
+          leadsCreated: true,
+          leadsAssigned: true,
+          createdOrganizations: true,
+          chatParticipants: true,
+          messages: true
+        }
+      });
+
+      if (!user || !user.password) {
         return res.status(401).json({ 
           error: 'Profile not found', 
           message: `Your profile doesn't exist in this organization (${organization.name})` 
@@ -285,7 +295,33 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // Update last login
+    const isStoreTestUser = user?.isStoreTestUser === true;
+
+    // WEB login: enforce org/user allowlists (optional) before issuing token.
+    if (!isStoreTestUser && !headerDeviceId) {
+      const ip = getClientIP(req);
+      const orgAllowedIps = organization?.allowedIps || organization?.allowed_ips || [];
+      const userAllowedIps = user?.allowedIps || user?.allowed_ips || [];
+      if (Array.isArray(orgAllowedIps) && orgAllowedIps.length > 0) {
+        if (!isIPAllowed(ip, orgAllowedIps)) {
+          return res.status(403).json({
+            code: 'ACCESS_DENIED',
+            message: 'Unauthorized access',
+            reason: 'IP_RESTRICTED',
+          });
+        }
+      }
+      if (Array.isArray(userAllowedIps) && userAllowedIps.length > 0) {
+        if (!isIPAllowed(ip, userAllowedIps)) {
+          return res.status(403).json({
+            code: 'ACCESS_DENIED',
+            message: 'Unauthorized access',
+            reason: 'IP_RESTRICTED',
+          });
+        }
+      }
+    }
+
     await prisma.user.update({ 
       where: { id: user.id }, 
       data: { 
@@ -297,27 +333,73 @@ exports.login = async (req, res, next) => {
     });
     
     const permissions = await getUserPermissions(user);
-    const organizationId = user.organization ? user.organization.id : null;
-    const accessToken = generateAccessToken({ userId: user.id, organizationId, permissions });
+    const organizationId = isSuperAdmin ? organization.id : (user.organization ? user.organization.id : null);
+    if (!isStoreTestUser && headerDeviceId) {
+      const orgMobile = await prisma.organization.findUnique({
+        where: { id: organization.id },
+        select: { mobileAppEnabled: true }
+      });
+      if (orgMobile && orgMobile.mobileAppEnabled === false) {
+        return res.status(403).json({ code: 'ACCESS_DENIED', message: 'Unauthorized access' });
+      }
+
+      const device = await prisma.mobileDevice.findUnique({
+        where: { deviceId: headerDeviceId },
+        select: { organizationId: true, userId: true, isApproved: true, applyOrgIps: true, applyUserIps: true }
+      });
+      if (
+        !device ||
+        device.organizationId !== organizationId ||
+        device.userId !== user.id ||
+        device.isApproved !== true
+      ) {
+        return res.status(403).json({ code: 'ACCESS_DENIED', message: 'Unauthorized access' });
+      }
+
+      // Mobile login: org/user allowlists are optional per-device.
+      const ip = getClientIP(req);
+      const orgAllowedIps = organization?.allowedIps || organization?.allowed_ips || [];
+      const userAllowedIps = user?.allowedIps || user?.allowed_ips || [];
+      if (device.applyOrgIps && Array.isArray(orgAllowedIps) && orgAllowedIps.length > 0) {
+        if (!isIPAllowed(ip, orgAllowedIps)) {
+          return res.status(403).json({
+            code: 'ACCESS_DENIED',
+            message: 'Unauthorized access',
+            reason: 'IP_RESTRICTED',
+          });
+        }
+      }
+      if (device.applyUserIps && Array.isArray(userAllowedIps) && userAllowedIps.length > 0) {
+        if (!isIPAllowed(ip, userAllowedIps)) {
+          return res.status(403).json({
+            code: 'ACCESS_DENIED',
+            message: 'Unauthorized access',
+            reason: 'IP_RESTRICTED',
+          });
+        }
+      }
+    }
+
+    const tokenPayload = {
+      userId: user.id,
+      user_id: user.id,
+      organizationId,
+      permissions,
+      ...(headerDeviceId ? { deviceId: headerDeviceId, device_id: headerDeviceId } : {}),
+    };
+
+    const accessToken = generateAccessToken(tokenPayload);
     const refreshToken = await generateRefreshToken(user.id);
     
-    // Build complete role details with permissions
-    const rolesWithPermissions = user.roles.map(role => ({
+    // Prepare full role information
+    const roles = user.roles.map(role => ({
       id: role.id,
       name: role.name,
       description: role.description,
       isActive: role.isActive,
       isAgent: role.isAgent,
       createdAt: role.createdAt,
-      updatedAt: role.updatedAt,
-      organizationId: role.organizationId,
-      permissions: role.rolePermissions.map(permission => ({
-        id: permission.id,
-        action: permission.action,
-        resource: permission.resource,
-        createdAt: permission.createdAt,
-        organization: permission.organization
-      }))
+      updatedAt: role.updatedAt
     }));
 
     let userResponse = {
@@ -326,49 +408,35 @@ exports.login = async (req, res, next) => {
       firstName: user.firstName,
       lastName: user.lastName,
       emailVerified: user.emailVerified,
-      systemRole: user.roles.length > 0 ? user.roles[0].name : null,
-      roles: rolesWithPermissions,
-      permissions: permissions
+      phoneNumber: user.phoneNumber,
+      avatar: user.avatar,
+      extension: user.extension,
+      isActive: user.isActive,
+      lastLoginAt: user.lastLoginAt,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      roles: roles,
+      role: user.roles.length > 0 ? user.roles[0].name : null
     };
     
-    if (user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN')) {
-      userResponse.organizations = [
-        ...(user.createdOrganizations?.map(org => ({
-          id: org.id,
-          name: org.name,
-          slug: org.slug,
-          domain: org.domain,
-          description: org.description,
-          logo: org.logo,
-          website: org.website,
-          currency: org.currency,
-          language: org.language,
-          isActive: org.isActive,
-          enableCardValidation: org.enableCardValidation,
-          createdAt: org.createdAt,
-          updatedAt: org.updatedAt,
-          createdById: org.createdById,
-          role: 'SUPER_ADMIN'
-        })) || [])
-      ];
+    const excludeBackblazeCredentials = (org) => {
+      if (!org) return null;
+      const { b2BucketName, b2Region, b2Endpoint, b2KeyId, b2AppKey, ...orgWithoutCredentials } = org;
+      return orgWithoutCredentials;
+    };
+
+    if (user.roles.some(role => role.name === 'SUPER_ADMIN')) {
+      userResponse.organizations = [{
+        ...excludeBackblazeCredentials(organization),
+        role: 'SUPER_ADMIN',
+        roleDetails: user.roles.find(role => role.name === 'SUPER_ADMIN')
+      }];
     } else if (user.roles.some(role => role.name === 'ORGANIZATION_ADMIN')) {
       if (user.organization) {
         userResponse.organizations = [{
-          id: user.organization.id,
-          name: user.organization.name,
-          slug: user.organization.slug,
-          domain: user.organization.domain,
-          description: user.organization.description,
-          logo: user.organization.logo,
-          website: user.organization.website,
-          currency: user.organization.currency,
-          language: user.organization.language,
-          isActive: user.organization.isActive,
-          enableCardValidation: user.organization.enableCardValidation,
-          createdAt: user.organization.createdAt,
-          updatedAt: user.organization.updatedAt,
-          createdById: user.organization.createdById,
-          role: 'ORGANIZATION_ADMIN'
+          ...excludeBackblazeCredentials(user.organization),
+          role: 'ORGANIZATION_ADMIN',
+          roleDetails: user.roles.find(role => role.name === 'ORGANIZATION_ADMIN')
         }];
       } else {
         userResponse.organizations = [];
@@ -376,32 +444,9 @@ exports.login = async (req, res, next) => {
     } else {
       if (user.organization) {
         userResponse.organizations = [{
-          id: user.organization.id,
-          name: user.organization.name,
-          slug: user.organization.slug,
-          domain: user.organization.domain,
-          description: user.organization.description,
-          logo: user.organization.logo,
-          website: user.organization.website,
-          currency: user.organization.currency,
-          language: user.organization.language,
-          isActive: user.organization.isActive,
-          enableCardValidation: user.organization.enableCardValidation,
-          createdAt: user.organization.createdAt,
-          updatedAt: user.organization.updatedAt,
-          createdById: user.organization.createdById,
+          ...excludeBackblazeCredentials(user.organization),
           role: user.roles.length > 0 ? user.roles[0].name : null,
-          roleDetails: user.roles.length > 0 ? {
-            id: user.roles[0].id,
-            name: user.roles[0].name,
-            description: user.roles[0].description,
-            isActive: user.roles[0].isActive,
-            isAgent: user.roles[0].isAgent,
-            permissions: user.roles[0].rolePermissions.map(permission => ({
-              action: permission.action,
-              resource: permission.resource
-            }))
-          } : null
+          roleDetails: user.roles.length > 0 ? user.roles[0] : null
         }];
       } else {
         userResponse.organizations = [];
@@ -524,47 +569,15 @@ exports.forgotPassword = async (req, res, next) => {
 };
 
 exports.getMe = async (req, res) => {
-  try {
-    // Fetch user with organization details
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      include: {
-        organization: true,
-        roles: true
-      }
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+  res.json({
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      firstName: req.user.firstName,
+      lastName: req.user.lastName,
+      avatar: req.user.avatar,
+      emailVerified: req.user.emailVerified,
+      role: req.user.roles.length > 0 ? req.user.roles[0].name : null 
     }
-
-    let userResponse = {
-      id: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      avatar: user.avatar,
-      emailVerified: user.emailVerified,
-      role: user.roles.length > 0 ? user.roles[0].name : null,
-      organization: user.organization ? {
-        id: user.organization.id,
-        name: user.organization.name,
-        slug: user.organization.slug,
-        domain: user.organization.domain,
-        description: user.organization.description,
-        logo: user.organization.logo,
-        website: user.organization.website,
-        currency: user.organization.currency,
-        language: user.organization.language,
-        isActive: user.organization.isActive,
-        createdAt: user.organization.createdAt,
-        updatedAt: user.organization.updatedAt,
-        createdById: user.organization.createdById
-      } : null
-    };
-
-    res.json({ user: userResponse });
-  } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  });
 }; 

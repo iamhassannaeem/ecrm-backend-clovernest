@@ -49,6 +49,10 @@ export const usersAPI = {
   updateUserRole: (userId, organizationId, roleId) =>
     api.put(`/api/org-admin/users/${userId}/role`, { roleId, organizationId }),
 };
+// Store Test Users API
+export const storeTestUsersAPI = {
+  create: (data) => api.post("/api/super-admin/store-test-users", data),
+};
 
 // Organizations API
 export const organizationsAPI = {
@@ -62,7 +66,10 @@ export const organizationsAPI = {
     api.get(`/api/super-admin/organizations/${organizationId}/org-admin-permissions`),
   updateCardValidation: (organizationId, enableCardValidation) =>
     api.patch(`/api/super-admin/organizations/${organizationId}/card-validation`, { enableCardValidation }),
+  updateMobileAppEnabled: (organizationId, mobileAppEnabled) =>
+    api.patch(`/api/super-admin/organizations/${organizationId}/mobile-app`, { mobileAppEnabled }),
 };
+
 
 // Audit Logs API
 export const auditLogsAPI = {

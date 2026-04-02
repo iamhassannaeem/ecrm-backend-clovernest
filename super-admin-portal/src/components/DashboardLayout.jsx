@@ -1,15 +1,17 @@
 import React, { useState } from "react";
 import { Link, Outlet, useLocation, useNavigate, Routes, Route } from "react-router-dom";
-import { LogOut, BarChart3, Users, Building2, FileText, Menu, X } from "lucide-react";
+import { LogOut, BarChart3, Users, Building2, FileText, Menu, Shield, X } from "lucide-react";
 import AnalyticsPage from "../pages/AnalyticsPage";
 import UsersPage from "../pages/UsersPage";
 import OrganizationsPage from "../pages/OrganizationsPage";
 import AuditLogsPage from "../pages/AuditLogsPage";
+import StoreTestUsersPage from "../pages/StoreTestUsersPage";
 
 const navItems = [
   { name: "Analytics", path: "/analytics", icon: BarChart3 },
   { name: "Users", path: "/users", icon: Users },
   { name: "Organizations", path: "/organizations", icon: Building2 },
+  { name: "Store Test Users", path: "/store-test-users", icon: Shield },
   { name: "Audit Logs", path: "/audit-logs", icon: FileText },
 ];
 
@@ -95,6 +97,7 @@ export default function DashboardLayout() {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/organizations" element={<OrganizationsPage />} />
+            <Route path="/store-test-users" element={<StoreTestUsersPage />} />
             <Route path="/audit-logs" element={<AuditLogsPage />} />
             <Route path="/" element={<AnalyticsPage />} />
           </Routes>

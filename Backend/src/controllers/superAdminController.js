@@ -33,7 +33,9 @@ exports.getUsers = async (req, res, next) => {
   try {
     const { page = 1, limit = 20, search, status } = req.query;
     const skip = (page - 1) * limit;
-    const where = {};
+    const where = {
+      isDeleted: false // Exclude soft deleted users
+    };
     if (search) {
       where.OR = [
         { email: { contains: search, mode: 'insensitive' } },
@@ -53,6 +55,7 @@ exports.getUsers = async (req, res, next) => {
           firstName: true,
           lastName: true,
           isActive: true,
+          isStoreTestUser: true,
           lastLoginAt: true,
           createdAt: true,
           roles: { 
@@ -106,7 +109,11 @@ exports.getOrganizations = async (req, res, next) => {
       ];
     }
     if (status) {
-      where.status = status.toUpperCase();
+      // Organization model uses `isActive` (not `status`).
+      // Keep backward compatibility with existing portal query params.
+      const s = String(status).toUpperCase();
+      if (s === 'ACTIVE') where.isActive = true;
+      if (s === 'INACTIVE' || s === 'SUSPENDED' || s === 'CANCELLED') where.isActive = false;
     }
     const [organizations, total] = await Promise.all([
       prisma.organization.findMany({
