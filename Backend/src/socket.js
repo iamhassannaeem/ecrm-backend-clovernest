@@ -219,6 +219,40 @@ module.exports = function(io) {
       }
     });
 
+    // Join all 1:1 conversation rooms (no message load). Same pattern as subscribeAllGroupRooms.
+    socket.on('subscribeAllConversationRooms', async () => {
+      try {
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { organizationId: true }
+        });
+
+        if (!currentUser?.organizationId) {
+          return;
+        }
+
+        const participations = await prisma.chatParticipant.findMany({
+          where: {
+            userId,
+            organizationId: currentUser.organizationId
+          },
+          select: { chatSessionId: true }
+        });
+
+        for (const p of participations) {
+          const cid = p.chatSessionId.toString();
+          socket.join(`conversation_${cid}`);
+          userRooms.get(userId)?.add(`conversation_${cid}`);
+        }
+
+        console.log(
+          `[Socket.IO] subscribeAllConversationRooms: user ${userId} joined ${participations.length} conversation room(s)`
+        );
+      } catch (error) {
+        console.error('[Socket.IO] Error in subscribeAllConversationRooms:', error);
+      }
+    });
+
     
     socket.on('joinSession', async (conversationId) => {
       try {
