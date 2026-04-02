@@ -2,9 +2,33 @@ const jwt = require('jsonwebtoken');
 const { prisma } = require('../config/database');
 
 
-const generateAccessToken = ({ userId, organizationId, permissions }) => {
+const generateAccessToken = (input) => {
+  // Backward compatible:
+  // - generateAccessToken(userId:number)
+  // - generateAccessToken({ userId, organizationId, permissions, deviceId/device_id })
+  const payload =
+    input && typeof input === 'object'
+      ? input
+      : { userId: input };
+
+  const {
+    userId,
+    organizationId,
+    permissions,
+    deviceId,
+    device_id,
+    user_id,
+  } = payload;
+
   return jwt.sign(
-    { userId, organizationId, permissions },
+    {
+      userId,
+      user_id,
+      organizationId,
+      permissions,
+      deviceId,
+      device_id,
+    },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
   );

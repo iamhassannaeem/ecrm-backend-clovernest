@@ -5,7 +5,7 @@ const { authenticateToken, requireOrgAdminAccess, allowSelfOrPermission } = requ
 const { hashPassword } = require('../utils/password');
 const { AUDIT_ACTIONS, AUDIT_RESOURCES } = require('../utils/audit');
 const bcrypt = require('bcryptjs');
-const { createUser, updateUserRole, updateUserStatus, createRole, getOrganizationUsers, getUserProfileById, updateUserProfile, deleteUser } = require('../controllers/orgAdminController');
+const { createUser, updateUserRole, updateUserStatus, createRole, getOrganizationUsers, getUserProfileById, updateUserProfile, deleteUser, restoreUser, getUserAllowedIps, updateUserAllowedIps } = require('../controllers/orgAdminController'); 
 
 const router = express.Router();
 
@@ -306,6 +306,10 @@ router.post('/roles', [
  */
 // Add this route for listing users in the organization
 router.get('/users', getOrganizationUsers);
+router.get('/users/:userId/allowed-ips', authenticateToken, requireOrgAdminAccess, getUserAllowedIps);
+router.put('/users/:userId/allowed-ips', authenticateToken, requireOrgAdminAccess, [
+  body('allowed_ips').isArray().withMessage('allowed_ips must be an array')
+], updateUserAllowedIps);
 
 const profileActions = ['CREATE', 'DELETE', 'UPDATE', 'READ', 'MANAGE'];
 /**

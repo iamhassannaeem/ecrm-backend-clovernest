@@ -8,7 +8,7 @@ const router = express.Router();
 // Import middleware
 const { authenticateToken } = require('../middleware/auth');
 const { requireOrgAdmin, requireOrgUser } = require('../middleware/auth');
-const { getOrganizationById, updateOrganization } = require('../controllers/organizationsController');
+const { getOrganizationById, updateOrganization, getLeadAssignmentMode, getWhitelisting, updateWhitelisting, listMobileDevices } = require('../controllers/organizationsController');
 
 /**
  * @swagger
@@ -100,6 +100,9 @@ router.use(authenticateToken);
  */
 // Get organization by ID
 router.get('/:organizationId', requireOrgUser, getOrganizationById);
+router.get('/:organizationId/whitelisting', requireOrgAdmin, getWhitelisting);
+router.put('/:organizationId/whitelisting', requireOrgAdmin, updateWhitelisting);
+router.get('/:organizationId/mobile-devices', requireOrgAdmin, listMobileDevices);
 
 /**
  * @swagger
@@ -163,7 +166,8 @@ router.put('/:organizationId', requireOrgAdmin, [
   body('website').optional().isURL(),
   body('currency').optional().isString(),
   body('language').optional().isString(),
-  body('logoUrl').optional().isURL()
+  body('logoUrl').optional().isURL(),
+  body('chatDisplayMode').optional().isIn(['FULLSCREEN', 'CHATBOX'])
 ], updateOrganization);
 
 // Get all Team Leads for an organization

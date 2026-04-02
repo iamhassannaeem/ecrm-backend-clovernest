@@ -39,6 +39,8 @@ const callsRoutes = require('./routes/calls');
 const notificationRoutes = require('./routes/notifications');
 const attachmentRoutes = require('./routes/attachments');
 const uploadRoutes = require('./routes/upload');
+const pushRoutes = require('./routes/push');
+const mobileRoutes = require('./routes/mobile');
 
 
 // Initialize Express app
@@ -234,7 +236,8 @@ app.use('/api/calls', callsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/attachments', attachmentRoutes);
 app.use('/api/upload', uploadRoutes);
-
+app.use('/api/push', pushRoutes);
+app.use('/api/mobile', mobileRoutes);
 
 // Error handling middleware
 app.use(notFound);

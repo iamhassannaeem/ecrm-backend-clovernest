@@ -165,6 +165,60 @@ module.exports = function(io) {
       console.log(`[Socket.IO] User ${userId} joined org_${organizationId}`);
     });
 
+    // Join all group rooms the user may access (no message load). Required so newGroupMessage reaches
+    // clients who have not opened the Group UI yet (broadcasts only go to group_<id> rooms).
+    socket.on('subscribeAllGroupRooms', async () => {
+      try {
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            organizationId: true,
+            roles: { select: { name: true } }
+          }
+        });
+
+        if (!currentUser?.organizationId) {
+          return;
+        }
+
+        const isOrgAdmin = currentUser.roles?.some((r) => r.name === 'ORGANIZATION_ADMIN');
+
+        let groupIds = [];
+        if (isOrgAdmin) {
+          const gcs = await prisma.groupChat.findMany({
+            where: {
+              organizationId: currentUser.organizationId,
+              isActive: true
+            },
+            select: { id: true }
+          });
+          groupIds = gcs.map((g) => g.id);
+        } else {
+          const parts = await prisma.groupChatParticipant.findMany({
+            where: {
+              userId,
+              organizationId: currentUser.organizationId,
+              isActive: true
+            },
+            select: { groupChatId: true }
+          });
+          groupIds = parts.map((p) => p.groupChatId);
+        }
+
+        for (const rawId of groupIds) {
+          const gidStr = rawId.toString();
+          socket.join(`group_${gidStr}`);
+          userRooms.get(userId)?.add(`group_${gidStr}`);
+        }
+
+        console.log(
+          `[Socket.IO] subscribeAllGroupRooms: user ${userId} joined ${groupIds.length} group room(s)`
+        );
+      } catch (error) {
+        console.error('[Socket.IO] Error in subscribeAllGroupRooms:', error);
+      }
+    });
+
     
     socket.on('joinSession', async (conversationId) => {
       try {
@@ -204,11 +258,11 @@ module.exports = function(io) {
         socket.join(`conversation_${conversation.id}`);
         userRooms.get(userId)?.add(`conversation_${conversation.id}`);
 
-        
+        // Load only 20 recent messages for performance - client fetches more on scroll
         const messages = await prisma.message.findMany({
           where: { chatSessionId: conversation.id },
           orderBy: { createdAt: 'desc' },
-          take: 100,
+          take: 20,
           include: {
             sender: {
               select: {
@@ -304,7 +358,12 @@ module.exports = function(io) {
         const [currentUser, targetUser] = await Promise.all([
           prisma.user.findUnique({
             where: { id: userId },
-            select: { organizationId: true }
+            select: { 
+              organizationId: true,
+              roles: {
+                select: { name: true }
+              }
+            }
           }),
           prisma.user.findUnique({
             where: { id: parseInt(targetUserId) },
@@ -312,7 +371,14 @@ module.exports = function(io) {
           })
         ]);
 
-        if (!currentUser || !targetUser || currentUser.organizationId !== targetUser.organizationId) {
+        if (!currentUser || !targetUser) {
+          socket.emit('error', { message: 'User not found' });
+          return;
+        }
+
+        const isSuperAdmin = currentUser.roles && currentUser.roles.some(role => role.name === 'SUPER_ADMIN');
+        
+        if (!isSuperAdmin && currentUser.organizationId !== targetUser.organizationId) {
           socket.emit('error', { message: 'Users not in same organization' });
           return;
         }
@@ -388,11 +454,11 @@ module.exports = function(io) {
 
         console.log(`[Socket.IO] User ${userId} joining conversation ${conversation.id}`);
         
-        // Fetch messages for the conversation
+        // Load only 20 recent messages for performance - client fetches more on scroll
         const messages = await prisma.message.findMany({
           where: { chatSessionId: conversation.id },
           orderBy: { createdAt: 'desc' },
-          take: 100,
+          take: 20,
           include: {
             sender: {
               select: {
@@ -569,6 +635,7 @@ module.exports = function(io) {
      
 
         
+        // Emit to conversation room (for users who have joined the conversation)
         io.to(`conversation_${conversationId}`).emit('newMessage', messageData);
         
         const broadcastTime = Date.now() - startTime;
@@ -587,15 +654,46 @@ module.exports = function(io) {
         await updateUnreadCount(conversationId);
 
         
+        // Send message and notifications only to actual participants
         const otherParticipants = conversation.participants.filter(p => p.userId !== userId);
         console.log(`[Socket.IO] 🔗 OTHER PARTICIPANTS - Count: ${otherParticipants.length}`);
         
         for (const participant of otherParticipants) {
-          const isOnline = activeConnections.has(participant.userId);
-          console.log(`[Socket.IO] 👤 Participant ${participant.userId} - Online: ${isOnline}`);
+          const participantSocket = activeConnections.get(participant.userId);
+          const isOnline = !!participantSocket;
+          const isInConversation = participantSocket && participantSocket.rooms.has(`conversation_${conversationId}`);
           
-          if (!isOnline) {
-            
+          console.log(`[Socket.IO] 👤 Participant ${participant.userId} - Online: ${isOnline}, InConversation: ${isInConversation}`);
+          
+          if (isOnline) {
+            // If user is online but not in conversation room, send message to their personal room
+            if (!isInConversation) {
+              // Send message to user's personal room so they receive it
+              io.to(`user_${participant.userId}`).emit('newMessage', messageData);
+              
+              // Send notification toast
+              participantSocket.emit('newMessageNotification', {
+                conversationId: conversationId.toString(),
+                senderId: userId,
+                senderName: messageData.senderName,
+                content: content.length > 50 ? content.substring(0, 50) + '...' : content,
+                timestamp: new Date()
+              });
+              
+              // Create notification record
+              await createChatMessageNotification(
+                userId,
+                participant.userId,
+                conversationId,
+                content,
+                conversation.organizationId
+              );
+              console.log(`[Socket.IO] 📱 NOTIFICATION SENT - To online user ${participant.userId} (not in conversation)`);
+            }
+            // If user is in conversation room, they already received the message via conversation room broadcast
+            // No need to send notification
+          } else {
+            // User is offline - create notification for when they come back
             await createChatMessageNotification(
               userId,
               participant.userId,
@@ -604,31 +702,6 @@ module.exports = function(io) {
               conversation.organizationId
             );
             console.log(`[Socket.IO] 📱 NOTIFICATION CREATED - For offline user ${participant.userId}`);
-          }
-        }
-
-        
-        for (const participant of otherParticipants) {
-          const participantSocket = activeConnections.get(participant.userId);
-          const isInConversation = participantSocket && participantSocket.rooms.has(`conversation_${conversationId}`);
-          
-          if (participantSocket && !isInConversation) {
-            participantSocket.emit('newMessageNotification', {
-              conversationId: conversationId.toString(),
-              senderId: userId,
-              senderName: messageData.senderName,
-              content: content.length > 50 ? content.substring(0, 50) + '...' : content,
-              timestamp: new Date()
-            });
-            
-            await createChatMessageNotification(
-              userId,
-              participant.userId,
-              conversationId,
-              content,
-              conversation.organizationId
-            );
-            console.log(`[Socket.IO]  PUSH NOTIFICATION SENT - To online user ${participant.userId} (not in conversation)`);
           }
         }
 
@@ -761,6 +834,7 @@ module.exports = function(io) {
         };
 
         console.log(`[Socket.IO] 📤 BROADCASTING ATTACHMENT - Broadcasting to conversation ${conversationId}`);
+        // Emit to conversation room (for users who have joined the conversation)
         io.to(`conversation_${conversationId}`).emit('newMessage', messageData);
         
         const broadcastTime = Date.now() - startTime;
@@ -777,12 +851,50 @@ module.exports = function(io) {
 
         await updateUnreadCount(conversationId);
 
+        // Send message and notifications only to actual participants
         const otherParticipants = conversation.participants.filter(p => p.userId !== userId);
         
         for (const participant of otherParticipants) {
-          const isOnline = activeConnections.has(participant.userId);
+          const participantSocket = activeConnections.get(participant.userId);
+          const isOnline = !!participantSocket;
+          const isInConversation = participantSocket && participantSocket.rooms.has(`conversation_${conversationId}`);
           
-          if (!isOnline) {
+          if (isOnline) {
+            // If user is online but not in conversation room, send message to their personal room
+            if (!isInConversation) {
+              // Send message to user's personal room so they receive it
+              io.to(`user_${participant.userId}`).emit('newMessage', messageData);
+              
+              // Send notification toast
+              participantSocket.emit('newMessageNotification', {
+                conversationId: conversationId.toString(),
+                senderId: userId,
+                senderName: messageData.senderName,
+                content: `📎 ${fileName}`,
+                timestamp: new Date()
+              });
+              
+              // Create notification record
+              await createChatMessageNotification(
+                userId,
+                participant.userId,
+                conversationId,
+                `📎 ${fileName}`,
+                conversation.organizationId,
+                'DIRECT',
+                {
+                  id: attachment.id,
+                  fileName: attachment.fileName,
+                  mimeType: attachment.mimeType,
+                  size: attachment.size
+                }
+              );
+              console.log(`[Socket.IO] 📱 NOTIFICATION SENT - To online user ${participant.userId} (not in conversation)`);
+            }
+            // If user is in conversation room, they already received the message via conversation room broadcast
+            // No need to send notification
+          } else {
+            // User is offline - create notification for when they come back
             await createChatMessageNotification(
               userId,
               participant.userId,
@@ -798,21 +910,6 @@ module.exports = function(io) {
               }
             );
             console.log(`[Socket.IO] 📱 NOTIFICATION CREATED - For offline user ${participant.userId} with attachment info`);
-          }
-        }
-
-        // Send push notifications to online users not in conversation
-        for (const participant of otherParticipants) {
-          const participantSocket = activeConnections.get(participant.userId);
-          if (participantSocket && !participantSocket.rooms.has(`conversation_${conversationId}`)) {
-            participantSocket.emit('newMessageNotification', {
-              conversationId: conversationId.toString(),
-              senderId: userId,
-              senderName: messageData.senderName,
-              content: `📎 ${fileName}`,
-              timestamp: new Date()
-            });
-            console.log(`[Socket.IO]  PUSH NOTIFICATION SENT - To online user ${participant.userId}`);
           }
         }
 
@@ -872,6 +969,163 @@ module.exports = function(io) {
       }
     });
 
+    // Group chat buzz handler
+    socket.on('groupBuzz', async ({ groupId }) => {
+      try {
+        if (!groupId) {
+          socket.emit('error', { message: 'Group ID is required' });
+          return;
+        }
+
+        // Check if user is ORGANIZATION_ADMIN
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            organizationId: true,
+            roles: {
+              select: {
+                name: true
+              }
+            }
+          }
+        });
+
+        const isOrgAdmin = currentUser?.roles && currentUser.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+
+        // Check if user is a participant
+        const participant = await prisma.groupChatParticipant.findFirst({
+          where: {
+            groupChatId: BigInt(groupId),
+            userId,
+            isActive: true
+          },
+          include: {
+            groupChat: {
+              select: {
+                id: true,
+                name: true,
+                organizationId: true,
+                allowBuzz: true,
+                participants: {
+                  where: { isActive: true },
+                  select: { userId: true }
+                }
+              }
+            }
+          }
+        });
+
+        if (!participant || !participant.groupChat) {
+          if (isOrgAdmin) {
+            // Verify group belongs to same organization
+            const groupChat = await prisma.groupChat.findUnique({
+              where: { id: BigInt(groupId) },
+              select: {
+                id: true,
+                name: true,
+                organizationId: true,
+                allowBuzz: true,
+                participants: {
+                  where: { isActive: true },
+                  select: { userId: true }
+                }
+              }
+            });
+            
+            if (!groupChat || groupChat.organizationId !== currentUser.organizationId) {
+              socket.emit('error', { message: 'Not a participant in this group' });
+              return;
+            }
+            // Allow ORGANIZATION_ADMIN to buzz even if not a participant
+          } else {
+            socket.emit('error', { message: 'Not a participant in this group' });
+            return;
+          }
+        }
+
+        const groupChat = participant?.groupChat || await prisma.groupChat.findUnique({
+          where: { id: BigInt(groupId) },
+          select: {
+            id: true,
+            name: true,
+            organizationId: true,
+            allowBuzz: true,
+            participants: {
+              where: { isActive: true },
+              select: { userId: true }
+            }
+          }
+        });
+
+        if (!groupChat) {
+          socket.emit('error', { message: 'Group not found' });
+          return;
+        }
+
+        // Check if buzz is allowed for this group
+        if (groupChat.allowBuzz === false) {
+          socket.emit('error', { message: 'Buzz feature is disabled for this group' });
+          return;
+        }
+
+        const sender = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { firstName: true, lastName: true }
+        });
+
+        const senderName = `${sender.firstName} ${sender.lastName || ''}`.trim();
+
+        // Broadcast buzz to all group members in the group room (excluding sender)
+        const buzzData = {
+          groupId: groupId.toString(),
+          groupName: groupChat.name,
+          senderId: userId,
+          senderName: senderName,
+          timestamp: new Date()
+        };
+
+        // Broadcast to all members in the group room (excluding sender)
+        io.to(`group_${groupId}`).emit('groupBuzzReceived', buzzData);
+
+        // Also send to members not in the room but online
+        const participantUserIds = groupChat.participants.map(p => p.userId);
+        for (const participantUserId of participantUserIds) {
+          // Don't send buzz to the sender
+          if (participantUserId === userId) continue;
+
+          const participantSocket = activeConnections.get(participantUserId);
+          if (participantSocket && !participantSocket.rooms.has(`group_${groupId}`)) {
+            participantSocket.emit('groupBuzzReceived', buzzData);
+          }
+        }
+
+        // Create notifications for offline users
+        const otherParticipants = groupChat.participants.filter(p => p.userId !== userId);
+        for (const otherParticipant of otherParticipants) {
+          const isOnline = activeConnections.has(otherParticipant.userId);
+          
+          if (!isOnline) {
+            // Create notification for offline user
+            await createChatMessageNotification(
+              userId,
+              otherParticipant.userId,
+              groupId,
+              '🔔 Buzz!',
+              groupChat.organizationId,
+              'GROUP_CHAT'
+            );
+            console.log(`[Socket.IO] 📱 GROUP BUZZ NOTIFICATION CREATED - For offline user ${otherParticipant.userId}`);
+          }
+        }
+
+        console.log(`[Socket.IO] 🔔 GROUP BUZZ - User ${userId} (${senderName}) buzzed group ${groupId} (${groupChat.name})`);
+
+      } catch (error) {
+        console.error(`[Socket.IO] ERROR in groupBuzz:`, error);
+        socket.emit('error', { message: 'Failed to send group buzz' });
+      }
+    });
+
     socket.on('uploadGroupAttachment', async ({ groupId, fileUrl, fileName, mimeType, size, content = '' }) => {
       const startTime = Date.now();
       console.log(`[Socket.IO] 📎 GROUP ATTACHMENT UPLOAD - User ${userId} uploading file to group ${groupId}`);
@@ -904,6 +1158,21 @@ module.exports = function(io) {
           return;
         }
 
+        // Check if user is ORGANIZATION_ADMIN
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            organizationId: true,
+            roles: {
+              select: {
+                name: true
+              }
+            }
+          }
+        });
+
+        const isOrgAdmin = currentUser?.roles && currentUser.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+
         const participant = await prisma.groupChatParticipant.findFirst({
           where: {
             groupChatId: BigInt(groupId),
@@ -924,13 +1193,32 @@ module.exports = function(io) {
           }
         });
 
+        // If not a participant, check if ORGANIZATION_ADMIN and group belongs to same org
         if (!participant || !participant.groupChat) {
-          console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} not participant in group ${groupId}`);
-          socket.emit('error', { message: 'Not a participant in this group' })
-          return;
+          if (isOrgAdmin) {
+            // Verify group belongs to same organization
+            const groupChat = await prisma.groupChat.findUnique({
+              where: { id: BigInt(groupId) },
+              select: {
+                id: true,
+                organizationId: true
+              }
+            });
+            
+            if (!groupChat || groupChat.organizationId !== currentUser.organizationId) {
+              console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} (ORG_ADMIN) not in same org as group ${groupId}`);
+              socket.emit('error', { message: 'Not a participant in this group' });
+              return;
+            }
+            // ORGANIZATION_ADMIN can proceed
+          } else {
+            console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} not participant in group ${groupId}`);
+            socket.emit('error', { message: 'Not a participant in this group' });
+            return;
+          }
         }
 
-        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
+        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is ${isOrgAdmin ? 'ORGANIZATION_ADMIN' : 'participant'} in group ${groupId}`);
 
         const message = await prisma.groupChatMessage.create({
           data: {
@@ -1253,7 +1541,22 @@ module.exports = function(io) {
           return;
         }
 
+        // Check if user is ORGANIZATION_ADMIN
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            organizationId: true,
+            roles: {
+              select: {
+                name: true
+              }
+            }
+          }
+        });
+
+        const isOrgAdmin = currentUser?.roles && currentUser.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
         
+        // Try to find participant
         const participant = await prisma.groupChatParticipant.findFirst({
           where: {
             groupChatId: BigInt(groupId),
@@ -1287,21 +1590,91 @@ module.exports = function(io) {
                     email: true,
                     avatar: true
                   }
+                },
+                groupAdmins: {
+                  include: {
+                    user: {
+                      select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        email: true,
+                        avatar: true
+                      }
+                    }
+                  }
                 }
               }
             }
           }
         });
 
-        if (!participant) {
+        // If not a participant and not ORGANIZATION_ADMIN, reject
+        if (!participant && !isOrgAdmin) {
           socket.emit('error', { message: 'Not a participant in this group' });
           return;
+        }
+
+        // If ORGANIZATION_ADMIN but not a participant, fetch group data separately
+        let groupChatData = null;
+        if (!participant && isOrgAdmin) {
+          groupChatData = await prisma.groupChat.findUnique({
+            where: { id: BigInt(groupId) },
+            include: {
+              participants: {
+                where: { isActive: true },
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      email: true,
+                      avatar: true,
+                      isOnline: true,
+                      lastSeen: true
+                    }
+                  }
+                }
+              },
+              admin: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                  avatar: true
+                }
+              },
+              groupAdmins: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      email: true,
+                      avatar: true
+                    }
+                  }
+                }
+              }
+            }
+          });
+
+          // Verify the group belongs to the same organization
+          if (!groupChatData || groupChatData.organizationId !== currentUser.organizationId) {
+            socket.emit('error', { message: 'Not a participant in this group' });
+            return;
+          }
         }
 
         
         socket.join(`group_${groupId}`);
         userRooms.get(userId)?.add(`group_${groupId}`);
 
+        // Use groupChatData from participant or fetched data for ORGANIZATION_ADMIN
+        const groupChat = participant?.groupChat || groupChatData;
         
         const messages = await prisma.groupChatMessage.findMany({
           where: { groupChatId: BigInt(groupId) },
@@ -1332,11 +1705,22 @@ module.exports = function(io) {
         socket.emit('groupChatLoaded', {
           groupId: groupId.toString(),
           group: {
-            id: participant.groupChat.id.toString(),
-            name: participant.groupChat.name,
-            description: participant.groupChat.description,
-            admin: participant.groupChat.admin,
-            participants: participant.groupChat.participants.map(p => ({
+            id: groupChat.id.toString(),
+            name: groupChat.name,
+            description: groupChat.description,
+            admin: groupChat.admin,
+            groupAdmins: groupChat.groupAdmins?.map(ga => ({
+              id: ga.user.id,
+              userId: ga.userId,
+              user: {
+                id: ga.user.id,
+                firstName: ga.user.firstName,
+                lastName: ga.user.lastName,
+                email: ga.user.email,
+                avatar: ga.user.avatar
+              }
+            })) || [],
+            participants: groupChat.participants.map(p => ({
               id: p.user.id,
               name: `${p.user.firstName} ${p.user.lastName || ''}`.trim(),
               email: p.user.email,
@@ -1349,8 +1733,15 @@ module.exports = function(io) {
             id: m.id,
             senderId: m.senderId,
             senderName: `${m.sender.firstName} ${m.sender.lastName || ''}`.trim(),
+            sender: {
+              id: m.sender.id,
+              firstName: m.sender.firstName,
+              lastName: m.sender.lastName,
+              avatar: m.sender.avatar
+            },
             content: m.content,
             createdAt: m.createdAt,
+            messageType: 'text',
             attachments: m.attachments.map(att => ({
               id: att.id,
               fileName: att.fileName,
@@ -1372,19 +1763,61 @@ module.exports = function(io) {
     });
 
     
-    socket.on('sendGroupMessage', async ({ groupId, content, messageType = 'text' }) => {
+    socket.on('sendGroupMessage', async ({ groupId, content, messageType = 'text', attachment, attachments }) => {
       const startTime = Date.now();
       
       
       try {
-        if (!groupId || !content) {
+        const att = attachment && attachment.fileUrl
+          ? attachment
+          : (Array.isArray(attachments) && attachments[0]?.fileUrl ? attachments[0] : null);
+        const rawContent = content != null ? String(content).trim() : '';
+        const messageContent = rawContent || (att ? `📎 ${att.fileName || 'file'}` : '');
+        if (!groupId || messageContent === '') {
           console.log(`[Socket.IO]  VALIDATION FAILED - Missing groupId or content`);
           socket.emit('error', { message: 'Group ID and content are required' });
           return;
         }
 
-        
-        const participant = await prisma.groupChatParticipant.findFirst({
+        if (att) {
+          if (!att.fileUrl || !att.fileName || !att.mimeType || att.size == null) {
+            socket.emit('error', { message: 'Attachment requires fileUrl, fileName, mimeType, and size' });
+            return;
+          }
+          const sizeNum = Number(att.size);
+          if (sizeNum > 10 * 1024 * 1024) {
+            socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
+            return;
+          }
+          const allowedMimeTypes = [
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+            'application/pdf', 'text/plain', 'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          ];
+          if (!allowedMimeTypes.includes(att.mimeType)) {
+            socket.emit('error', { message: 'File type not allowed' });
+            return;
+          }
+        }
+
+        // Check if user is ORGANIZATION_ADMIN
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            organizationId: true,
+            roles: {
+              select: {
+                name: true
+              }
+            }
+          }
+        });
+
+        const isOrgAdmin = currentUser?.roles && currentUser.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+
+        let participant = await prisma.groupChatParticipant.findFirst({
           where: {
             groupChatId: BigInt(groupId),
             userId,
@@ -1404,19 +1837,42 @@ module.exports = function(io) {
           }
         });
 
+        // ORGANIZATION_ADMIN can view and read all groups, but can only send messages if they are a participant
+        // Check if user is a participant (required for sending messages, even for ORGANIZATION_ADMIN)
         if (!participant || !participant.groupChat) {
-          socket.emit('error', { message: 'Not a participant in this group' });
-          return;
+          if (isOrgAdmin) {
+            // Verify group belongs to same organization
+            const groupChat = await prisma.groupChat.findUnique({
+              where: { id: BigInt(groupId) },
+              select: {
+                id: true,
+                organizationId: true
+              }
+            });
+            
+            if (!groupChat || groupChat.organizationId !== currentUser.organizationId) {
+              socket.emit('error', { message: 'Not a participant in this group' });
+              return;
+            }
+            // ORGANIZATION_ADMIN can view/read but cannot send messages if not a participant
+            socket.emit('error', { 
+              message: 'You can only send messages to groups where you are a member. You can view and read messages from all groups, but must be a participant to send messages.' 
+            });
+            return;
+          } else {
+            socket.emit('error', { message: 'Not a participant in this group' });
+            return;
+          }
         }
 
-        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is participant in group ${groupId}`);
+        console.log(`[Socket.IO]  PERMISSION VERIFIED - User ${userId} is ${isOrgAdmin ? 'ORGANIZATION_ADMIN' : 'participant'} in group ${groupId}`);
 
         
-        const message = await prisma.groupChatMessage.create({
+        let message = await prisma.groupChatMessage.create({
           data: {
             groupChatId: BigInt(groupId),
             senderId: userId,
-            content,
+            content: messageContent,
             organizationId: participant.groupChat.organizationId
           },
           include: {
@@ -1441,6 +1897,43 @@ module.exports = function(io) {
           }
         });
 
+        if (att) {
+          await prisma.attachment.create({
+            data: {
+              organizationId: participant.groupChat.organizationId,
+              userId,
+              groupMessageId: message.id,
+              fileName: att.fileName,
+              filePath: att.fileUrl,
+              mimeType: att.mimeType,
+              size: BigInt(att.size)
+            }
+          });
+          message = await prisma.groupChatMessage.findUnique({
+            where: { id: message.id },
+            include: {
+              sender: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  avatar: true
+                }
+              },
+              attachments: {
+                select: {
+                  id: true,
+                  fileName: true,
+                  filePath: true,
+                  mimeType: true,
+                  size: true,
+                  createdAt: true
+                }
+              }
+            }
+          });
+        }
+
         console.log(`[Socket.IO] 💾 GROUP MESSAGE SAVED - Message ID: ${message.id}`);
 
         
@@ -1457,17 +1950,23 @@ module.exports = function(io) {
           groupId: groupId.toString(),
           senderId: message.senderId,
           senderName: `${message.sender.firstName} ${message.sender.lastName || ''}`.trim(),
+          sender: {
+            id: message.sender.id,
+            firstName: message.sender.firstName,
+            lastName: message.sender.lastName,
+            avatar: message.sender.avatar
+          },
           content: message.content,
           createdAt: message.createdAt,
-          messageType,
-          attachments: message.attachments.map(att => ({
-            id: att.id,
-            fileName: att.fileName,
-            fileUrl: att.filePath,
-            filePath: att.filePath,
-            mimeType: att.mimeType,
-            size: att.size.toString(),
-            createdAt: att.createdAt
+          messageType: att ? 'attachment' : messageType,
+          attachments: message.attachments.map(a => ({
+            id: a.id,
+            fileName: a.fileName,
+            fileUrl: a.filePath,
+            filePath: a.filePath,
+            mimeType: a.mimeType,
+            size: a.size.toString(),
+            createdAt: a.createdAt
           }))
         };
 
@@ -1498,7 +1997,7 @@ module.exports = function(io) {
               userId,
               otherParticipant.userId,
               groupId,
-              content,
+              messageContent,
               participant.groupChat.organizationId,
               'GROUP_CHAT'
             );
@@ -1514,7 +2013,7 @@ module.exports = function(io) {
               groupId: groupId.toString(),
               senderId: userId,
               senderName: messageData.senderName,
-              content: content.length > 50 ? content.substring(0, 50) + '...' : content,
+              content: messageContent.length > 50 ? messageContent.substring(0, 50) + '...' : messageContent,
               timestamp: new Date()
             });
           }
@@ -2010,6 +2509,115 @@ module.exports = function(io) {
       }
     });
 
+    // Delete group chat message (admin or message sender only)
+    socket.on('deleteGroupMessage', async ({ messageId, groupId }) => {
+      try {
+        if (!messageId) {
+          socket.emit('error', { message: 'Message ID is required' });
+          return;
+        }
+
+        if (!groupId) {
+          socket.emit('error', { message: 'Group ID is required' });
+          return;
+        }
+
+        // Get the group message
+        const groupMessage = await prisma.groupChatMessage.findUnique({
+          where: { id: BigInt(messageId) },
+          include: {
+            groupChat: {
+              include: {
+                participants: {
+                  where: { isActive: true },
+                  select: { userId: true }
+                }
+              }
+            }
+          }
+        });
+
+        if (!groupMessage) {
+          socket.emit('error', { message: 'Group message not found' });
+          return;
+        }
+
+        // Check if user is ORGANIZATION_ADMIN
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            organizationId: true,
+            roles: {
+              select: {
+                name: true
+              }
+            }
+          }
+        });
+
+        const isOrgAdmin = currentUser?.roles && currentUser.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+        
+        // Check if user is a participant in the group
+        const isParticipant = groupMessage.groupChat.participants.some(p => p.userId === userId);
+        
+        // If not a participant, check if ORGANIZATION_ADMIN and group belongs to same org
+        if (!isParticipant) {
+          if (isOrgAdmin) {
+            // Verify group belongs to same organization
+            const groupChat = await prisma.groupChat.findUnique({
+              where: { id: groupMessage.groupChatId },
+              select: {
+                organizationId: true
+              }
+            });
+            
+            if (!groupChat || groupChat.organizationId !== currentUser.organizationId) {
+              socket.emit('error', { message: 'Not a participant in this group' });
+              return;
+            }
+            // ORGANIZATION_ADMIN can proceed
+          } else {
+            socket.emit('error', { message: 'Not a participant in this group' });
+            return;
+          }
+        }
+
+        // Check if user is the admin of the group
+        const isAdmin = groupMessage.groupChat.adminId === userId;
+        
+        // Check if user is the sender of the message
+        const isSender = groupMessage.senderId === userId;
+
+        // Only admin or message sender can delete messages
+        if (!isAdmin && !isSender) {
+          socket.emit('error', { message: 'You do not have permission to delete this message. Only group admin or message sender can delete messages.' });
+          return;
+        }
+
+        // Soft delete by updating content
+        await prisma.groupChatMessage.update({
+          where: { id: BigInt(messageId) },
+          data: { 
+            content: '[Message deleted]',
+            updatedAt: new Date()
+          }
+        });
+
+        // Broadcast deletion to all group members
+        io.to(`group_${groupId}`).emit('groupMessageDeleted', {
+          messageId: parseInt(messageId),
+          groupId: groupId.toString(),
+          timestamp: new Date()
+        });
+
+        console.log(`[Socket.IO] Group message ${messageId} deleted by user ${userId} in group ${groupId}`);
+
+      } catch (error) {
+        console.error('[Socket.IO] Error in deleteGroupMessage:', error);
+        socket.emit('error', { message: 'Failed to delete group message' });
+      }
+    });
+
     
     socket.on('disconnect', async () => {
       console.log(`[Socket.IO] User disconnected: userId=${userId}, socketId=${socket.id}`);
@@ -2071,6 +2679,26 @@ async function updateUnreadCount(conversationId) {
     await prisma.chatSession.update({
       where: { id: conversationId },
       data: { unreadCount: unreadCounts }
+    });
+
+    // CRITICAL FIX: Send unread count update individually to each participant
+    // This ensures each user only receives their own unread count, not everyone's
+    // Send to each user's personal room (user_${userId}) to ensure they receive it
+    for (const participant of participants) {
+      const participantUnreadCount = unreadCounts[participant.userId] || 0;
+      
+      // Send to user's personal room - this ensures they receive it even if not in conversation room
+      io.to(`user_${participant.userId}`).emit('unreadCountUpdate', {
+        conversationId: conversationId.toString(),
+        unreadCounts: { [participant.userId]: participantUnreadCount }
+      });
+    }
+    
+    // Also send to conversation room with all counts (for backward compatibility)
+    // Frontend will filter to get only the current user's count
+    io.to(`conversation_${conversationId}`).emit('unreadCountUpdate', {
+      conversationId: conversationId.toString(),
+      unreadCounts: unreadCounts
     });
 
   } catch (error) {

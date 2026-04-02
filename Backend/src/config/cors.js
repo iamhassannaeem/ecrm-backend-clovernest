@@ -20,7 +20,8 @@ const corsOptions = {
       'https://crm-admin-api-sandbox.elogixit.com',
       'https://jptech.elogixit.com',
       'https://growlatics.elogixit.com',
-      'https://clovernest.elogixit.com'
+      'https://clovernest.elogixit.com',
+      'https://integral-kid-legally.ngrok-free.app'
     ];
 
     // In production, you might want to be more restrictive

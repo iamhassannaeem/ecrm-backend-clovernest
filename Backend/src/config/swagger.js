@@ -763,6 +763,28 @@ const options = {
               type: 'string',
               example: 'https://techstart-solutions.com',
               description: 'Updated organization website (optional, can be any text including links)'
+            },
+            currency: {
+              type: 'string',
+              example: 'USD',
+              description: 'Organization currency'
+            },
+            language: {
+              type: 'string',
+              example: 'en',
+              description: 'Organization language'
+            },
+            logoUrl: {
+              type: 'string',
+              format: 'uri',
+              example: 'https://example.com/logo.png',
+              description: 'Organization logo URL'
+            },
+            chatDisplayMode: {
+              type: 'string',
+              enum: ['FULLSCREEN', 'CHATBOX'],
+              example: 'FULLSCREEN',
+              description: 'How chat should be displayed for the organization'
             }
           }
         },

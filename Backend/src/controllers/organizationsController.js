@@ -1,10 +1,15 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { prisma } = require('../config/database');
 const PermissionService = require('../services/permissionService');
 
 exports.getOrganizationById = async (req, res, next) => {
   try {
-    if (!PermissionService.canAccessOrganization(req.user, req.params.organizationId)) {
+    const organizationId = parseInt(req.params.organizationId, 10);
+    
+    if (isNaN(organizationId)) {
+      return res.status(400).json({ error: 'Invalid organization ID' });
+    }
+
+    if (!PermissionService.canAccessOrganization(req.user, organizationId)) {
       return res.status(403).json({
         error: 'You don\'t have permission to access this organization. Required organization permissions.',
         code: 'PERMISSION_DENIED'
@@ -12,7 +17,7 @@ exports.getOrganizationById = async (req, res, next) => {
     }
 
     const organization = await prisma.organization.findUnique({
-      where: { id: req.params.organizationId },
+      where: { id: organizationId },
     });
     
     if (!organization) {
@@ -28,6 +33,41 @@ exports.getOrganizationById = async (req, res, next) => {
     }
 
     res.json({ organization: filteredOrganizations[0] });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getLeadAssignmentMode = async (req, res, next) => {
+  try {
+    const organizationId = Number(req.params.organizationId);
+    
+    if (!PermissionService.canAccessOrganization(req.user, organizationId)) {
+      return res.status(403).json({
+        error: 'You don\'t have access to this organization',
+        code: 'ORG_ACCESS_DENIED'
+      });
+    }
+
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        leadAssignmentMode: true,
+        roleBasedAssignmentRoleId: true,
+        leadFormLayout: true
+      }
+    });
+    
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json({
+      leadAssignmentMode: organization.leadAssignmentMode || 'MANUAL',
+      roleBasedAssignmentRoleId: organization.roleBasedAssignmentRoleId,
+      leadFormLayout: organization.leadFormLayout || 'SINGLE_PAGE'
+    });
   } catch (error) {
     next(error);
   }
@@ -54,7 +94,29 @@ exports.updateOrganization = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { name, description, website, currency, language, logoUrl } = req.body;
+    const { name, description, website, currency, language, logoUrl, leadAssignmentMode, roleBasedAssignmentRoleId, leadFormLayout, transcriptionMode, chatDisplayMode } = req.body;
+    
+    if (leadAssignmentMode === 'ROLE_BASED' && roleBasedAssignmentRoleId) {
+      const role = await prisma.role.findFirst({
+        where: {
+          id: parseInt(roleBasedAssignmentRoleId),
+          organizationId: Number(req.params.organizationId),
+          isActive: true
+        }
+      });
+      
+      if (!role) {
+        return res.status(400).json({ error: 'Invalid role for role-based assignment' });
+      }
+    }
+    
+    if (transcriptionMode !== undefined && transcriptionMode !== null && !['TRANSCRIBE_ONLY', 'FULL_EVALUATION'].includes(transcriptionMode)) {
+      return res.status(400).json({ error: 'transcriptionMode must be TRANSCRIBE_ONLY or FULL_EVALUATION' });
+    }
+    
+    if (chatDisplayMode !== undefined && chatDisplayMode !== null && !['FULLSCREEN', 'CHATBOX'].includes(chatDisplayMode)) {
+      return res.status(400).json({ error: 'chatDisplayMode must be FULLSCREEN or CHATBOX' });
+    }
     
     const updateData = {
       ...(name && { name }),
@@ -62,7 +124,12 @@ exports.updateOrganization = async (req, res, next) => {
       ...(website !== undefined && { website }),
       ...(currency !== undefined && { currency }),
       ...(language !== undefined && { language }),
-      ...(logoUrl && { logo: logoUrl })
+      ...(logoUrl && { logo: logoUrl }),
+      ...(leadAssignmentMode && { leadAssignmentMode }),
+      ...(roleBasedAssignmentRoleId !== undefined && { roleBasedAssignmentRoleId: roleBasedAssignmentRoleId ? parseInt(roleBasedAssignmentRoleId) : null }),
+      ...(leadFormLayout && { leadFormLayout }),
+      ...(transcriptionMode !== undefined && { transcriptionMode }),
+      ...(chatDisplayMode !== undefined && { chatDisplayMode })
     };
     
     const organization = await prisma.organization.update({
@@ -71,6 +138,125 @@ exports.updateOrganization = async (req, res, next) => {
     });
     
     res.json({ message: 'Organization updated successfully', organization });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getWhitelisting = async (req, res, next) => {
+  try {
+    const organizationId = Number(req.params.organizationId);
+    if (!PermissionService.canAccessOrganization(req.user, organizationId)) {
+      return res.status(403).json({ error: 'Permission denied', code: 'PERMISSION_DENIED' });
+    }
+
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        allowedIps: true,
+        allowedIpLabels: true,
+        mobileAppEnabled: true,
+      },
+    });
+
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    return res.json({
+      organizationId: organization.id,
+      allowed_ips: organization.allowedIps || [],
+      allowed_ip_labels: organization.allowedIpLabels || {},
+      mobile_app_enabled: !!organization.mobileAppEnabled,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateWhitelisting = async (req, res, next) => {
+  try {
+    const organizationId = Number(req.params.organizationId);
+    if (!PermissionService.canAccessOrganization(req.user, organizationId)) {
+      return res.status(403).json({ error: 'Permission denied', code: 'PERMISSION_DENIED' });
+    }
+
+    const { allowed_ips, allowed_ip_labels } = req.body || {};
+    if (!Array.isArray(allowed_ips)) {
+      return res.status(400).json({ error: 'allowed_ips must be an array' });
+    }
+
+    const normalized = allowed_ips
+      .map((x) => String(x).trim())
+      .filter(Boolean);
+
+    const nextLabelsRaw =
+      allowed_ip_labels && typeof allowed_ip_labels === 'object' && !Array.isArray(allowed_ip_labels)
+        ? allowed_ip_labels
+        : {};
+
+    const normalizedLabels = {};
+    for (const ip of normalized) {
+      const label = nextLabelsRaw[ip];
+      if (label == null) continue;
+      const s = String(label).trim();
+      if (!s) continue;
+      normalizedLabels[ip] = s;
+    }
+
+    const organization = await prisma.organization.update({
+      where: { id: organizationId },
+      data: { allowedIps: normalized, allowedIpLabels: normalizedLabels },
+      select: { id: true, allowedIps: true, allowedIpLabels: true, mobileAppEnabled: true },
+    });
+
+    return res.json({
+      message: 'Whitelisting updated successfully',
+      organizationId: organization.id,
+      allowed_ips: organization.allowedIps || [],
+      allowed_ip_labels: organization.allowedIpLabels || {},
+      mobile_app_enabled: !!organization.mobileAppEnabled,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.listMobileDevices = async (req, res, next) => {
+  try {
+    const organizationId = Number(req.params.organizationId);
+    if (!PermissionService.canAccessOrganization(req.user, organizationId)) {
+      return res.status(403).json({ error: 'Permission denied', code: 'PERMISSION_DENIED' });
+    }
+
+    const status = String(req.query.status || 'all').toLowerCase();
+    const where = {
+      organizationId,
+      ...(status === 'pending' ? { isApproved: false } : {}),
+      ...(status === 'approved' ? { isApproved: true } : {}),
+    };
+
+    const devices = await prisma.mobileDevice.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        deviceId: true,
+        deviceName: true,
+        platform: true,
+        isApproved: true,
+        allowedIps: true,
+        applyOrgIps: true,
+        applyUserIps: true,
+        lastIp: true,
+        createdAt: true,
+        approvedAt: true,
+        userId: true,
+      },
+    });
+
+    return res.json({ devices });
   } catch (error) {
     next(error);
   }

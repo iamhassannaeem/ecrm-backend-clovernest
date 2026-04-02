@@ -1,4 +1,5 @@
 const { universalPermissionCheck, checkRoutePermission } = require('./auth');
+const { accessControlMiddleware } = require('./accessControl');
 
 
 const routePermissions = {
@@ -176,6 +177,8 @@ const globalPermissionMiddleware = (req, res, next) => {
       req.path.startsWith('/api/auth/google') ||
       req.path.startsWith('/api/auth/github') ||
       (req.path === '/api/calls' && req.method === 'POST') ||
+      req.path === '/api/mobile/request-device' ||
+      req.path === '/api/mobile/device-status' ||
       req.path.startsWith('/api/lookup') ||
       req.path === '/test-lead' ||
       req.path === '/chat-test' ||
@@ -195,8 +198,12 @@ const globalPermissionMiddleware = (req, res, next) => {
     req.path.startsWith('/api/upload/') ||
     req.path.startsWith('/api/leads/orders/') && req.path.endsWith('/final-status') || 
     req.path.startsWith('/api/leads/phone/') ||
-    req.path.startsWith('/api/notifications')) {  
-  return universalPermissionCheck(req, res, next);
+    req.path.startsWith('/api/notifications') ||
+    req.path.startsWith('/api/push/')) {
+      return universalPermissionCheck(req, res, (err) => {
+        if (err) return next(err);
+        return accessControlMiddleware(req, res, next);
+      });
 }
   
  
@@ -204,7 +211,8 @@ const globalPermissionMiddleware = (req, res, next) => {
     if (err) {
       return next(err);
     }
-    
+    accessControlMiddleware(req, res, (accessErr) => {
+      if (accessErr) return next(accessErr);
    
     const requiredPermission = matchRoute(req.path, req.method);
     
@@ -223,6 +231,7 @@ const globalPermissionMiddleware = (req, res, next) => {
     );
     
     permissionMiddleware(req, res, next);
+  });
   });
 };
 

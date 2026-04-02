@@ -1,9 +1,23 @@
 const jwt = require('jsonwebtoken');
 const { prisma } = require('../config/database');
 
+function hasRole(user, roleName) {
+  return Boolean(user?.roles && user.roles.some((r) => r.name === roleName));
+}
+
+function isSuperAdminUser(user) {
+  return (
+    user?.systemRole === 'SUPER_ADMIN' ||
+    hasRole(user, 'SUPER_ADMIN') ||
+    hasRole(user, 'Super Admin')
+  );
+}
 
 async function getUserPermissions(user) {
-  if (user.roles && user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN')) {
+  if (user?.isStoreTestUser) {
+    return [{ action: 'ALL', resource: 'ALL' }];
+  }
+  if (isSuperAdminUser(user)) {
     return [{ action: 'ALL', resource: 'ALL' }];
   }
   let permissions = [];
@@ -36,6 +50,7 @@ const universalPermissionCheck = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('Token decoded successfully for user:', decoded.userId);
+    req.auth = decoded;
 
     let user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -44,9 +59,9 @@ const universalPermissionCheck = async (req, res, next) => {
       }
     });
 
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || user.isDeleted) {
       return res.status(401).json({
-        error: 'Invalid or inactive user',
+        error: 'Invalid, inactive, or deleted user',
         code: 'INVALID_USER'
       });
     }
@@ -98,8 +113,8 @@ const universalPermissionCheck = async (req, res, next) => {
     user.id = decoded.userId;
     req.user = user;
 
-    const isSuperAdmin = user.roles && user.roles.some(role => role.name === 'Super Admin' || role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
-    const isOrgAdmin = user.roles && user.roles.some(role => role.name === 'Organization Admin' || role.name === 'ORGANIZATION_ADMIN');
+    const isSuperAdmin = isSuperAdminUser(user);
+    const isOrgAdmin = hasRole(user, 'ORGANIZATION_ADMIN');
     const isAgent = user.roles && user.roles.some(role => role.isAgent === true);
 
     if (isSuperAdmin) {
@@ -151,7 +166,12 @@ const universalPermissionCheck = async (req, res, next) => {
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    let token = authHeader && authHeader.split(' ')[1];
+    
+    // Fallback: Check query parameter for token (useful for image downloads via <img> tags)
+    if (!token && req.query && req.query.token) {
+      token = req.query.token;
+    }
 
     if (!token) {
       return res.status(401).json({
@@ -161,15 +181,16 @@ const authenticateToken = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.auth = decoded;
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       include: { roles: { include: { rolePermissions: true } } }
     });
 
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || user.isDeleted) {
       return res.status(401).json({
-        error: 'Invalid or inactive user',
+        error: 'Invalid, inactive, or deleted user',
         code: 'INVALID_USER'
       });
     }
@@ -220,11 +241,14 @@ const checkRoutePermission = (requiredAction, requiredResource, options = {}) =>
       return next();
     }
 
+ 
 
     const hasPermission = req.user.permissions && req.user.permissions.some(perm => {
       return (perm.action === 'ALL' && perm.resource === 'ALL') ||
         (perm.action === requiredAction && perm.resource === requiredResource);
     });
+
+    console.log('Has permission:', hasPermission);
 
     if (hasPermission) {
       return next();
@@ -328,7 +352,7 @@ const requireSuperAdmin = (req, res, next) => {
     });
   }
 
-  const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
+  const isSuperAdmin = isSuperAdminUser(req.user);
 
   if (!isSuperAdmin) {
     return res.status(403).json({
@@ -351,8 +375,8 @@ const requireOrgAdminAccess = async (req, res, next) => {
   }
 
   const organizationId = req.user.organizationId || req.headers['x-organization-id'] || req.params.organizationId;
-  const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
-  const isOrgAdmin = req.user.roles && req.user.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+  const isSuperAdmin = isSuperAdminUser(req.user);
+  const isOrgAdmin = hasRole(req.user, 'ORGANIZATION_ADMIN');
 
   if (isSuperAdmin) {
     if (organizationId) {
@@ -396,7 +420,6 @@ const requireOrgAdminAccess = async (req, res, next) => {
 
 
 const requireOrgUserAccess = async (req, res, next) => {
-  console.log('requireOrgUserAccess called', req.user && req.user.roles);
   if (!req.user) {
     return res.status(401).json({
       error: 'Authentication required',
@@ -405,8 +428,8 @@ const requireOrgUserAccess = async (req, res, next) => {
   }
 
   const organizationId = req.user.organizationId || req.headers['x-organization-id'] || req.params.organizationId;
-  const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
-  const isOrgAdmin = req.user.roles && req.user.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+  const isSuperAdmin = isSuperAdminUser(req.user);
+  const isOrgAdmin = hasRole(req.user, 'ORGANIZATION_ADMIN');
   const isAgent = req.user.roles && req.user.roles.some(role => role.isAgent === true);
   const isUser = req.user.roles && req.user.roles.some(role => role.name === 'USER');
 
@@ -422,11 +445,11 @@ const requireOrgUserAccess = async (req, res, next) => {
         });
       }
       req.organizationId = organizationId;
-      req.userRole = 'SUPER_ADMIN';
-      req.isSuperAdmin = true;
-      next();
-      return;
     }
+    req.userRole = 'SUPER_ADMIN';
+    req.isSuperAdmin = true;
+    next();
+    return;
   }
 
   if (isOrgAdmin) {
@@ -454,8 +477,6 @@ const requireOrgUserAccess = async (req, res, next) => {
     const orgUser = await prisma.user.findUnique({
       where: { id: req.user.id }
     });
-    console.log('User:', orgUser);
-    console.log('Token orgId:', organizationId, 'DB orgId:', orgUser && orgUser.organizationId);
     if (!orgUser || !orgUser.isActive || orgUser.organizationId !== Number(organizationId)) {
       return res.status(403).json({
         error: 'Organization access required',
@@ -469,7 +490,6 @@ const requireOrgUserAccess = async (req, res, next) => {
     return;
   }
 
-
   if (isUser) {
     if (!organizationId) {
       return res.status(400).json({
@@ -480,8 +500,6 @@ const requireOrgUserAccess = async (req, res, next) => {
     const orgUser = await prisma.user.findUnique({
       where: { id: req.user.id }
     });
-    console.log('Regular User:', orgUser);
-    console.log('Token orgId:', organizationId, 'DB orgId:', orgUser && orgUser.organizationId);
     if (!orgUser || !orgUser.isActive || orgUser.organizationId !== Number(organizationId)) {
       return res.status(403).json({
         error: 'Organization access required',
@@ -511,8 +529,8 @@ const requireOrgAdmin = (req, res, next) => {
   }
 
   const organizationId = req.user.organizationId || req.headers['x-organization-id'] || req.params.organizationId;
-  const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
-  const isOrgAdmin = req.user.roles && req.user.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
+  const isSuperAdmin = isSuperAdminUser(req.user);
+  const isOrgAdmin = hasRole(req.user, 'ORGANIZATION_ADMIN');
 
   const hasPermission = req.user.permissions && req.user.permissions.some(perm => {
     return (perm.action === 'MANAGE' && perm.resource === 'ORGANIZATION_SETTINGS') ||
@@ -563,7 +581,7 @@ const requireOrgUser = (req, res, next) => {
   }
 
   const organizationId = req.user.organizationId || req.headers['x-organization-id'] || req.params.organizationId;
-  const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
+  const isSuperAdmin = isSuperAdminUser(req.user);
   const hasPermission = req.user.permissions && req.user.permissions.some(perm => {
     return (perm.action === 'ALL' && perm.resource === 'ALL') ||
       (perm.action === 'UPDATE' && perm.resource === 'ORGANIZATION_SETTINGS') ||
@@ -593,7 +611,7 @@ const requireOrgUser = (req, res, next) => {
 
 const requirePermission = (action, resource) => {
   return (req, res, next) => {
-    const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
+    const isSuperAdmin = isSuperAdminUser(req.user);
     if (!req.user || !isSuperAdmin) {
       return res.status(403).json({
         error: 'Super admin access required',
@@ -613,7 +631,7 @@ const requireSystemPermission = (action, resource) => {
         code: 'AUTH_REQUIRED'
       });
     }
-    const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
+    const isSuperAdmin = isSuperAdminUser(req.user);
 
     if (!isSuperAdmin) {
       return res.status(403).json({
@@ -644,7 +662,7 @@ function checkPermission(action, resource) {
       return res.status(403).json({ error: 'Permission denied', code: 'PERMISSION_DENIED' });
     }
 
-    const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Super Admin' || role.name === 'SUPER_ADMIN');
+    const isSuperAdmin = isSuperAdminUser(req.user);
     if (isSuperAdmin) {
       return next();
     }

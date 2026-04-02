@@ -20,13 +20,14 @@ async function getContacts(req, res) {
     const organizationId = user.organizationId;
 
     const permissions = await getUserPermissions(req.user);
-    const canChatWithAgents = permissions.some(
+    const hasAllAccess = permissions.some(p => p.action === 'ALL' && p.resource === 'ALL');
+    const canChatWithAgents = hasAllAccess || permissions.some(
       p => p.action === 'CHAT' && p.resource === 'AGENT_TO_AGENT_CHAT'
     );
-    const canChatWithTeamLeads = permissions.some(
+    const canChatWithTeamLeads = hasAllAccess || permissions.some(
       p => p.action === 'CHAT' && p.resource === 'AGENT_TO_TEAM_LEAD_CHAT'
     );
-    const canChatWithAll = permissions.some(
+    const canChatWithAll = hasAllAccess || permissions.some(
       p => p.action === 'CHAT' && p.resource === 'TEAM_LEAD_ALL_CHAT'
     );
 
@@ -233,13 +234,14 @@ async function getOrCreateConversation(req, res) {
     const isTeamLead = currentUser.roles.some(r => r.name === 'TEAM_LEAD');
 
     const permissions = await getUserPermissions(req.user);
-    const canChatWithAgents = permissions.some(
+    const hasAllAccess = permissions.some(p => p.action === 'ALL' && p.resource === 'ALL');
+    const canChatWithAgents = hasAllAccess || permissions.some(
       p => p.action === 'CHAT' && p.resource === 'AGENT_TO_AGENT_CHAT'
     );
-    const canChatWithTeamLeads = permissions.some(
+    const canChatWithTeamLeads = hasAllAccess || permissions.some(
       p => p.action === 'CHAT' && p.resource === 'AGENT_TO_TEAM_LEAD_CHAT'
     );
-    const canChatWithAll = permissions.some(
+    const canChatWithAll = hasAllAccess || permissions.some(
       p => p.action === 'CHAT' && p.resource === 'TEAM_LEAD_ALL_CHAT'
     );
 
@@ -357,10 +359,13 @@ async function getMessages(req, res) {
     const userId = req.user.id;
     const { conversationId } = req.params;
     const { page = 1, limit = 50 } = req.query;
-    const skip = (page - 1) * limit;
+    const parsedLimit = Math.min(parseInt(limit) || 50, 100); // Cap at 100 for performance
+    const parsedPage = Math.max(parseInt(page) || 1, 1);
+    const skip = (parsedPage - 1) * parsedLimit;
+    const convIdBigInt = BigInt(conversationId);
     
     const conversation = await prisma.chatSession.findUnique({
-        where: { id: conversationId },
+        where: { id: convIdBigInt },
       include: { participants: true }
     });
     
@@ -377,10 +382,10 @@ async function getMessages(req, res) {
     
     const [messages, totalCount] = await Promise.all([
       prisma.message.findMany({
-        where: { chatSessionId: conversationId },
+        where: { chatSessionId: convIdBigInt },
         orderBy: { createdAt: 'desc' },
-        skip: parseInt(skip),
-        take: parseInt(limit),
+        skip,
+        take: parsedLimit,
         include: { 
           sender: {
             select: {
@@ -403,11 +408,11 @@ async function getMessages(req, res) {
         }
       }),
       prisma.message.count({
-        where: { chatSessionId: conversationId }
+        where: { chatSessionId: convIdBigInt }
       })
     ]);
     
-    const totalPages = Math.ceil(totalCount / limit);
+    const totalPages = Math.ceil(totalCount / parsedLimit);
     
     res.json({
       messages: messages.map(m => ({
@@ -429,11 +434,11 @@ async function getMessages(req, res) {
         }))
       })),
       pagination: {
-        currentPage: parseInt(page),
+        currentPage: parsedPage,
         totalPages,
         totalCount,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
+        hasNextPage: parsedPage < totalPages,
+        hasPrevPage: parsedPage > 1
       }
     });
   } catch (error) {
@@ -820,6 +825,8 @@ async function getUserOnlineStatus(req, res) {
     const currentUserId = req.user.id;
     
     
+    const isSuperAdmin = req.user.roles && req.user.roles.some(role => role.name === 'SUPER_ADMIN');
+    
     const currentUser = await prisma.user.findUnique({
       where: { id: currentUserId },
       select: { organizationId: true }
@@ -839,7 +846,11 @@ async function getUserOnlineStatus(req, res) {
       }
     });
 
-    if (!targetUser || targetUser.organizationId !== currentUser.organizationId) {
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!isSuperAdmin && targetUser.organizationId !== currentUser.organizationId) {
       return res.status(404).json({ error: 'User not found' });
     }
 
@@ -1049,10 +1060,126 @@ async function sendMessageWithAttachments(req, res) {
   }
 }
 
+// Search messages in a conversation
+async function searchMessages(req, res) {
+  try {
+    const userId = req.user.id;
+    const { conversationId } = req.params;
+    const { query, page = 1, limit = 50 } = req.query;
+    
+    if (!query || query.trim() === '') {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+    
+    const parsedLimit = Math.min(parseInt(limit) || 50, 100);
+    const parsedPage = Math.max(parseInt(page) || 1, 1);
+    const skip = (parsedPage - 1) * parsedLimit;
+    const convIdBigInt = BigInt(conversationId);
+    const searchTerm = query.trim();
+    
+    const conversation = await prisma.chatSession.findUnique({
+      where: { id: convIdBigInt },
+      include: { participants: true }
+    });
+    
+    if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
+      return res.status(403).json({ error: 'Not a participant in this conversation' });
+    }
+    
+    if (!conversation.isActive) {
+      return res.status(410).json({ 
+        error: 'Conversation is not active',
+        code: 'CONVERSATION_INACTIVE'
+      });
+    }
+    
+    const [messages, totalCount] = await Promise.all([
+      prisma.message.findMany({
+        where: {
+          chatSessionId: convIdBigInt,
+          content: {
+            contains: searchTerm,
+            mode: 'insensitive'
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: parsedLimit,
+        include: { 
+          sender: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              avatar: true
+            }
+          },
+          attachments: {
+            select: {
+              id: true,
+              fileName: true,
+              filePath: true,
+              mimeType: true,
+              size: true,
+              createdAt: true
+            }
+          }
+        }
+      }),
+      prisma.message.count({
+        where: {
+          chatSessionId: convIdBigInt,
+          content: {
+            contains: searchTerm,
+            mode: 'insensitive'
+          }
+        }
+      })
+    ]);
+    
+    const totalPages = Math.ceil(totalCount / parsedLimit);
+    
+    res.json({
+      messages: messages.map(m => ({
+        id: m.id,
+        senderId: m.senderId,
+        senderName: `${m.sender.firstName} ${m.sender.lastName || ''}`.trim(),
+        content: m.content,
+        createdAt: m.createdAt,
+        isRead: m.isRead,
+        readAt: m.readAt,
+        attachments: m.attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          fileUrl: att.filePath,
+          filePath: att.filePath,
+          mimeType: att.mimeType,
+          size: att.size.toString(),
+          createdAt: att.createdAt
+        }))
+      })),
+      pagination: {
+        currentPage: parsedPage,
+        totalPages,
+        totalCount,
+        hasNextPage: parsedPage < totalPages,
+        hasPrevPage: parsedPage > 1
+      }
+    });
+  } catch (error) {
+    console.error('Error in searchMessages:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+}
+
 module.exports = {
   getContacts,
   getOrCreateConversation,
   getMessages,
+  searchMessages,
   sendMessage,
   sendMessageWithAttachments,
   markMessagesAsRead,
