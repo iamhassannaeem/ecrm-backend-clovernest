@@ -167,7 +167,8 @@ router.put('/:organizationId', requireOrgAdmin, [
   body('currency').optional().isString(),
   body('language').optional().isString(),
   body('logoUrl').optional().isURL(),
-  body('chatDisplayMode').optional().isIn(['FULLSCREEN', 'CHATBOX'])
+  body('chatDisplayMode').optional().isIn(['FULLSCREEN', 'CHATBOX']),
+  body('timeZone').optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 })
 ], updateOrganization);
 
 // Get all Team Leads for an organization

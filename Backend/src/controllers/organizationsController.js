@@ -1,3 +1,4 @@
+const { DateTime } = require('luxon');
 const { prisma } = require('../config/database');
 const PermissionService = require('../services/permissionService');
 
@@ -94,7 +95,7 @@ exports.updateOrganization = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { name, description, website, currency, language, logoUrl, leadAssignmentMode, roleBasedAssignmentRoleId, leadFormLayout, transcriptionMode, chatDisplayMode } = req.body;
+    const { name, description, website, currency, language, logoUrl, leadAssignmentMode, roleBasedAssignmentRoleId, leadFormLayout, transcriptionMode, chatDisplayMode, timeZone } = req.body;
     
     if (leadAssignmentMode === 'ROLE_BASED' && roleBasedAssignmentRoleId) {
       const role = await prisma.role.findFirst({
@@ -117,6 +118,13 @@ exports.updateOrganization = async (req, res, next) => {
     if (chatDisplayMode !== undefined && chatDisplayMode !== null && !['FULLSCREEN', 'CHATBOX'].includes(chatDisplayMode)) {
       return res.status(400).json({ error: 'chatDisplayMode must be FULLSCREEN or CHATBOX' });
     }
+
+    if (timeZone !== undefined) {
+      const raw = timeZone === null || timeZone === '' ? '' : String(timeZone).trim();
+      if (raw && !DateTime.now().setZone(raw).isValid) {
+        return res.status(400).json({ error: 'Invalid IANA time zone (e.g. America/New_York)' });
+      }
+    }
     
     const updateData = {
       ...(name && { name }),
@@ -129,7 +137,11 @@ exports.updateOrganization = async (req, res, next) => {
       ...(roleBasedAssignmentRoleId !== undefined && { roleBasedAssignmentRoleId: roleBasedAssignmentRoleId ? parseInt(roleBasedAssignmentRoleId) : null }),
       ...(leadFormLayout && { leadFormLayout }),
       ...(transcriptionMode !== undefined && { transcriptionMode }),
-      ...(chatDisplayMode !== undefined && { chatDisplayMode })
+      ...(chatDisplayMode !== undefined && { chatDisplayMode }),
+      ...(timeZone !== undefined && {
+        timeZone:
+          timeZone === null || timeZone === '' ? 'America/New_York' : String(timeZone).trim()
+      })
     };
     
     const organization = await prisma.organization.update({
