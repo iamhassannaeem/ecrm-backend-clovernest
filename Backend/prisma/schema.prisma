@@ -20,6 +20,8 @@ model Organization {
   website               String?
   currency              String?
   language              String?
+  /// IANA time zone (e.g. America/New_York). Used for date/time filters and display; DB timestamps remain UTC.
+  timeZone              String                  @default("America/New_York") @map("time_zone")
   chatDisplayMode       ChatDisplayMode         @default(FULLSCREEN)
   enableCardValidation  Boolean                 @default(false)
   isActive              Boolean                 @default(true)

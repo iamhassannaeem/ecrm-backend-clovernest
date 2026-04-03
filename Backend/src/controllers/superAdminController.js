@@ -1,3 +1,4 @@
+const { DateTime } = require('luxon');
 const { prisma } = require('../config/database');
 const { AUDIT_ACTIONS, AUDIT_RESOURCES } = require('../utils/audit');
 const bcrypt = require('bcrypt');
@@ -157,7 +158,8 @@ exports.createOrganization = async (req, res, next) => {
       adminEmail,
       adminPassword,
       adminFirstName,
-      adminLastName
+      adminLastName,
+      timeZone
     } = req.body;
     const existingAdmin = await prisma.user.findFirst({ 
       where: { 
@@ -170,6 +172,12 @@ exports.createOrganization = async (req, res, next) => {
     if (existingAdmin) {
       return res.status(409).json({ error: 'Admin user with this email already exists' });
     }
+    if (timeZone !== undefined && timeZone !== null && String(timeZone).trim()) {
+      const z = String(timeZone).trim();
+      if (!DateTime.now().setZone(z).isValid) {
+        return res.status(400).json({ error: 'Invalid IANA time zone identifier' });
+      }
+    }
     const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     const hashedPassword = await bcrypt.hash(adminPassword, 12);
     const result = await prisma.$transaction(async (tx) => {
@@ -180,6 +188,9 @@ exports.createOrganization = async (req, res, next) => {
           domain,
           description,
           website,
+          ...(timeZone && typeof timeZone === 'string' && timeZone.trim()
+            ? { timeZone: timeZone.trim() }
+            : {}),
           isActive: true,
           createdById: req.user.id,
 

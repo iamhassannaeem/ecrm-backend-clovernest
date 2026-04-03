@@ -1,6 +1,8 @@
 const { prisma } = require('../config/database');
 const { getUserPermissions } = require('../controllers/authController'); // Import permission helper
 const { createLeadAssignmentNotification } = require('./notificationController');
+const { buildCreatedAtRange } = require('../utils/dateTimeRangeFilter');
+const { getOrganizationTimeZone } = require('../utils/organizationTimeZone');
 
 // Function to mask card number (show first 6 and last 4 digits)
 function maskCardNumber(cardNumber) {
@@ -2240,6 +2242,8 @@ exports.getLeadsByUser = async (req, res, next) => {
       phone,
       fromDate,
       toDate,
+      fromTime,
+      toTime,
       email,
       confirmationNumber
     } = req.query;
@@ -2294,22 +2298,16 @@ exports.getLeadsByUser = async (req, res, next) => {
       where.phone = { contains: phone.trim(), mode: 'insensitive' };
     }
     
-    if (fromDate || toDate) {
-      where.createdAt = {};
-      
-      if (fromDate) {
-        const fromDateObj = new Date(fromDate + 'T00:00:00');
-        if (!isNaN(fromDateObj.getTime())) {
-          where.createdAt.gte = fromDateObj.toISOString();
-        }
-      }
-      
-      if (toDate) {
-        const toDateObj = new Date(toDate + 'T23:59:59.999');
-        if (!isNaN(toDateObj.getTime())) {
-          where.createdAt.lte = toDateObj.toISOString();
-        }
-      }
+    const orgTimeZone = await getOrganizationTimeZone(req.user.organizationId);
+    const createdAtRange = buildCreatedAtRange({
+      fromDate,
+      toDate,
+      fromTime,
+      toTime,
+      timeZone: orgTimeZone
+    });
+    if (createdAtRange) {
+      where.createdAt = createdAtRange;
     }
     
     if (search) {
@@ -2464,6 +2462,9 @@ exports.getLeadsByUser = async (req, res, next) => {
         confirmationNumber,
         fromDate,
         toDate,
+        fromTime,
+        toTime,
+        timeZone: orgTimeZone,
         search
       },
       permissionInfo: {
@@ -2770,7 +2771,9 @@ exports.getSalesReport = async (req, res, next) => {
       search,
       status,
       fromDate,
-      toDate
+      toDate,
+      fromTime,
+      toTime
     } = req.query;
     
 
@@ -2818,22 +2821,16 @@ exports.getSalesReport = async (req, res, next) => {
       where.status = status;
     }
     
-    if (fromDate || toDate) {
-      where.createdAt = {};
-      
-      if (fromDate) {
-        const fromDateObj = new Date(fromDate + 'T00:00:00');
-        if (!isNaN(fromDateObj.getTime())) {
-          where.createdAt.gte = fromDateObj.toISOString();
-        }
-      }
-      
-      if (toDate) {
-        const toDateObj = new Date(toDate + 'T23:59:59.999');
-        if (!isNaN(toDateObj.getTime())) {
-          where.createdAt.lte = toDateObj.toISOString();
-        }
-      }
+    const orgTimeZoneSales = await getOrganizationTimeZone(req.user.organizationId);
+    const createdAtRangeSales = buildCreatedAtRange({
+      fromDate,
+      toDate,
+      fromTime,
+      toTime,
+      timeZone: orgTimeZoneSales
+    });
+    if (createdAtRangeSales) {
+      where.createdAt = createdAtRangeSales;
     }
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -3002,7 +2999,10 @@ exports.getSalesReport = async (req, res, next) => {
         search,
         status,
         fromDate,
-        toDate
+        toDate,
+        fromTime,
+        toTime,
+        timeZone: orgTimeZoneSales
       }
     });
   } catch (error) {
@@ -3064,13 +3064,20 @@ exports.getFinalReport = async (req, res, next) => {
       page = 1, 
       limit = 50, 
       search,
+      finalStatus,
       fromDate,
-      toDate
+      toDate,
+      fromTime,
+      toTime
     } = req.query;
     
     const where = {
       organizationId: req.user.organizationId,  
     };
+
+    if (finalStatus && String(finalStatus).trim() !== '') {
+      where.status = String(finalStatus).trim();
+    }
     
     if (search && search.trim() !== '') {
       const searchTerm = search.trim();
@@ -3087,22 +3094,16 @@ exports.getFinalReport = async (req, res, next) => {
       ];
     }
     
-    if (fromDate || toDate) {
-      where.createdAt = {};
-      
-      if (fromDate) {
-        const fromDateObj = new Date(fromDate + 'T00:00:00');
-        if (!isNaN(fromDateObj.getTime())) {
-          where.createdAt.gte = fromDateObj.toISOString();
-        }
-      }
-      
-      if (toDate) {
-        const toDateObj = new Date(toDate + 'T23:59:59.999');
-        if (!isNaN(toDateObj.getTime())) {
-          where.createdAt.lte = toDateObj.toISOString();
-        }
-      }
+    const orgTimeZoneFinal = await getOrganizationTimeZone(req.user.organizationId);
+    const createdAtRangeFinal = buildCreatedAtRange({
+      fromDate,
+      toDate,
+      fromTime,
+      toTime,
+      timeZone: orgTimeZoneFinal
+    });
+    if (createdAtRangeFinal) {
+      where.createdAt = createdAtRangeFinal;
     }
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -3246,8 +3247,12 @@ exports.getFinalReport = async (req, res, next) => {
       },
       filters: {
         search,
+        finalStatus,
         fromDate,
-        toDate
+        toDate,
+        fromTime,
+        toTime,
+        timeZone: orgTimeZoneFinal
       }
     });
   } catch (error) {
