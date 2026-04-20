@@ -3,6 +3,17 @@ const { prisma } = require('./config/database');
 const { createChatMessageNotification } = require('./controllers/notificationController');
 const { getUserPermissions } = require('./utils/audit');
 
+function userMayDeleteOwnDirectMessage(permissions) {
+  if (!Array.isArray(permissions)) return false;
+  if (permissions.some((p) => p.action === 'ALL' && p.resource === 'ALL')) return true;
+  return permissions.some((p) => p.action === 'DELETE' && p.resource === 'ONE_TO_ONE_CHAT_MESSAGE');
+}
+
+function userMayDeleteOwnGroupMessage(permissions) {
+  if (!Array.isArray(permissions)) return false;
+  if (permissions.some((p) => p.action === 'ALL' && p.resource === 'ALL')) return true;
+  return permissions.some((p) => p.action === 'DELETE' && p.resource === 'GROUP_CHAT_MESSAGE');
+}
 
 function verifyToken(token) {
   try {
@@ -2521,6 +2532,12 @@ module.exports = function(io) {
           return;
         }
 
+        const permissions = await getUserPermissions({ id: userId });
+        if (!userMayDeleteOwnDirectMessage(permissions)) {
+          socket.emit('error', { message: 'You do not have permission to delete one-to-one chat messages' });
+          return;
+        }
+
         
         await prisma.message.update({
           where: { id: parseInt(messageId) },
@@ -2543,7 +2560,7 @@ module.exports = function(io) {
       }
     });
 
-    // Delete group chat message (admin or message sender only)
+    // Delete group chat message (own messages only, with GROUP_CHAT_MESSAGE DELETE permission)
     socket.on('deleteGroupMessage', async ({ messageId, groupId }) => {
       try {
         if (!messageId) {
@@ -2556,9 +2573,16 @@ module.exports = function(io) {
           return;
         }
 
+        // GroupChatMessage.id is Int in schema — must not use BigInt here
+        const messageIdInt = parseInt(messageId, 10);
+        if (Number.isNaN(messageIdInt)) {
+          socket.emit('error', { message: 'Invalid message ID' });
+          return;
+        }
+
         // Get the group message
         const groupMessage = await prisma.groupChatMessage.findUnique({
-          where: { id: BigInt(messageId) },
+          where: { id: messageIdInt },
           include: {
             groupChat: {
               include: {
@@ -2576,61 +2600,32 @@ module.exports = function(io) {
           return;
         }
 
-        // Check if user is ORGANIZATION_ADMIN
-        const currentUser = await prisma.user.findUnique({
-          where: { id: userId },
-          select: {
-            organizationId: true,
-            roles: {
-              select: {
-                name: true
-              }
-            }
-          }
-        });
-
-        const isOrgAdmin = currentUser?.roles && currentUser.roles.some(role => role.name === 'ORGANIZATION_ADMIN');
-        
-        // Check if user is a participant in the group
-        const isParticipant = groupMessage.groupChat.participants.some(p => p.userId === userId);
-        
-        // If not a participant, check if ORGANIZATION_ADMIN and group belongs to same org
-        if (!isParticipant) {
-          if (isOrgAdmin) {
-            // Verify group belongs to same organization
-            const groupChat = await prisma.groupChat.findUnique({
-              where: { id: groupMessage.groupChatId },
-              select: {
-                organizationId: true
-              }
-            });
-            
-            if (!groupChat || groupChat.organizationId !== currentUser.organizationId) {
-              socket.emit('error', { message: 'Not a participant in this group' });
-              return;
-            }
-            // ORGANIZATION_ADMIN can proceed
-          } else {
-            socket.emit('error', { message: 'Not a participant in this group' });
-            return;
-          }
+        if (Number(groupMessage.groupChatId) !== Number(groupId)) {
+          socket.emit('error', { message: 'Message does not belong to this group' });
+          return;
         }
 
-        // Check if user is the admin of the group
-        const isAdmin = groupMessage.groupChat.adminId === userId;
-        
-        // Check if user is the sender of the message
-        const isSender = groupMessage.senderId === userId;
+        const isParticipant = groupMessage.groupChat.participants.some(p => p.userId === userId);
+        if (!isParticipant) {
+          socket.emit('error', { message: 'Not a participant in this group' });
+          return;
+        }
 
-        // Only admin or message sender can delete messages
-        if (!isAdmin && !isSender) {
-          socket.emit('error', { message: 'You do not have permission to delete this message. Only group admin or message sender can delete messages.' });
+        const isSender = groupMessage.senderId === userId;
+        if (!isSender) {
+          socket.emit('error', { message: 'You can only delete your own messages' });
+          return;
+        }
+
+        const permissions = await getUserPermissions({ id: userId });
+        if (!userMayDeleteOwnGroupMessage(permissions)) {
+          socket.emit('error', { message: 'You do not have permission to delete group chat messages' });
           return;
         }
 
         // Soft delete by updating content
         await prisma.groupChatMessage.update({
-          where: { id: BigInt(messageId) },
+          where: { id: messageIdInt },
           data: { 
             content: '[Message deleted]',
             updatedAt: new Date()
@@ -2639,16 +2634,19 @@ module.exports = function(io) {
 
         // Broadcast deletion to all group members
         io.to(`group_${groupId}`).emit('groupMessageDeleted', {
-          messageId: parseInt(messageId),
+          messageId: messageIdInt,
           groupId: groupId.toString(),
           timestamp: new Date()
         });
 
-        console.log(`[Socket.IO] Group message ${messageId} deleted by user ${userId} in group ${groupId}`);
+        console.log(`[Socket.IO] Group message ${messageIdInt} deleted by user ${userId} in group ${groupId}`);
 
       } catch (error) {
         console.error('[Socket.IO] Error in deleteGroupMessage:', error);
-        socket.emit('error', { message: 'Failed to delete group message' });
+        const detail = error?.message || (typeof error === 'string' ? error : '');
+        socket.emit('error', {
+          message: detail ? `Failed to delete group message: ${detail}` : 'Failed to delete group message'
+        });
       }
     });
 
