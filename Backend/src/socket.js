@@ -592,14 +592,22 @@ module.exports = function(io) {
     });
 
     
-    socket.on('sendMessage', async ({ conversationId, content, messageType = 'text' }) => {
+    socket.on('sendMessage', async (payload, callback) => {
       const startTime = Date.now();
-    
-      
+      const ack = (data) => {
+        try {
+          if (typeof callback === 'function') callback(data);
+        } catch (e) {
+          /* ignore ack errors */
+        }
+      };
+      const { conversationId, content, messageType = 'text' } = payload || {};
+
       try {
         if (!conversationId || !content) {
           console.log(`[Socket.IO]  VALIDATION FAILED - Missing conversationId or content`);
           socket.emit('error', { message: 'Conversation ID and content are required' });
+          ack({ success: false, error: 'Conversation ID and content are required' });
           return;
         }
 
@@ -612,6 +620,7 @@ module.exports = function(io) {
         if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
           console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} not participant in conversation ${conversationId}`);
           socket.emit('error', { message: 'Not a participant in this conversation' });
+          ack({ success: false, error: 'Not a participant in this conversation' });
           return;
         }
 
@@ -695,7 +704,9 @@ module.exports = function(io) {
 
         console.log(`[Socket.IO]  DELIVERY CONFIRMATION SENT - To sender ${userId}, message ID: ${message.id}`);
 
-        
+        // Acknowledge immediately so the sender gets the real DB message id before slow notification work
+        ack({ success: true, messageId: message.id });
+
         await updateUnreadCount(conversationId);
 
         
@@ -751,16 +762,25 @@ module.exports = function(io) {
         }
 
         const totalTime = Date.now() - startTime;
-       
+        console.log(`[Socket.IO] sendMessage complete in ${totalTime}ms`);
 
       } catch (error) {
         const errorTime = Date.now() - startTime;
         console.error(`[Socket.IO]  ERROR in sendMessage after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to send message' });
+        ack({ success: false, error: 'Failed to send message' });
       }
     });
 
-    socket.on('uploadAttachment', async ({ conversationId, fileUrl, fileName, mimeType, size, content = '' }) => {
+    socket.on('uploadAttachment', async (payload, callback) => {
+      const ack = (data) => {
+        try {
+          if (typeof callback === 'function') callback(data);
+        } catch (e) {
+          /* ignore ack errors */
+        }
+      };
+      const { conversationId, fileUrl, fileName, mimeType, size, content = '' } = payload || {};
       const startTime = Date.now();
       console.log(`[Socket.IO] 📎 ATTACHMENT UPLOAD - User ${userId} uploading file to conversation ${conversationId}`);
       console.log(`[Socket.IO] 📎 File: ${fileName} (${mimeType}, ${size} bytes)`);
@@ -769,12 +789,14 @@ module.exports = function(io) {
         if (!conversationId || !fileUrl || !fileName || !mimeType || !size) {
           console.log(`[Socket.IO]  VALIDATION FAILED - Missing required attachment data`);
           socket.emit('error', { message: 'Conversation ID, file URL, file name, MIME type, and size are required' });
+          ack({ success: false, error: 'Conversation ID, file URL, file name, MIME type, and size are required' });
           return;
         }
 
         if (size > 10 * 1024 * 1024) {
           console.log(`[Socket.IO]  VALIDATION FAILED - File size too large: ${size} bytes`);
           socket.emit('error', { message: 'File size too large. Maximum size is 10MB' });
+          ack({ success: false, error: 'File size too large. Maximum size is 10MB' });
           return;
         }
 
@@ -789,6 +811,7 @@ module.exports = function(io) {
         if (!allowedMimeTypes.includes(mimeType)) {
           console.log(`[Socket.IO]  VALIDATION FAILED - File type not allowed: ${mimeType}`);
           socket.emit('error', { message: 'File type not allowed' });
+          ack({ success: false, error: 'File type not allowed' });
           return;
         }
 
@@ -800,6 +823,7 @@ module.exports = function(io) {
         if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
           console.log(`[Socket.IO]  PERMISSION DENIED - User ${userId} not participant in conversation ${conversationId}`);
           socket.emit('error', { message: 'Not a participant in this conversation' });
+          ack({ success: false, error: 'Not a participant in this conversation' });
           return;
         }
 
@@ -894,6 +918,8 @@ module.exports = function(io) {
 
         console.log(`[Socket.IO]  DELIVERY CONFIRMATION SENT - To sender ${userId}`);
 
+        ack({ success: true, messageId: message.id, attachmentId: attachment.id });
+
         await updateUnreadCount(conversationId);
 
         // Send message and notifications only to actual participants
@@ -965,6 +991,7 @@ module.exports = function(io) {
         const errorTime = Date.now() - startTime;
         console.error(`[Socket.IO]  ERROR in uploadAttachment after ${errorTime}ms:`, error);
         socket.emit('error', { message: 'Failed to upload attachment' });
+        ack({ success: false, error: 'Failed to upload attachment' });
       }
     });
 
@@ -2512,8 +2539,17 @@ module.exports = function(io) {
           return;
         }
 
+        const mid = typeof messageId === 'string' ? parseInt(messageId, 10) : Number(messageId);
+        const MAX_INT4 = 2147483647;
+        if (!Number.isFinite(mid) || mid < 1 || mid > MAX_INT4) {
+          socket.emit('error', {
+            message: 'Invalid message ID. If you just sent this message, wait a moment and try again, or refresh the chat.'
+          });
+          return;
+        }
+
         const message = await prisma.message.findUnique({
-          where: { id: parseInt(messageId) },
+          where: { id: mid },
           include: { chatSession: { include: { participants: true } } }
         });
 
@@ -2540,7 +2576,7 @@ module.exports = function(io) {
 
         
         await prisma.message.update({
-          where: { id: parseInt(messageId) },
+          where: { id: mid },
           data: { 
             content: '[Message deleted]',
             updatedAt: new Date()
@@ -2549,7 +2585,7 @@ module.exports = function(io) {
 
         
         io.to(`conversation_${message.chatSessionId}`).emit('messageDeleted', {
-          messageId: parseInt(messageId),
+          messageId: mid,
           conversationId: message.chatSessionId.toString(), 
           timestamp: new Date()
         });
@@ -2557,6 +2593,63 @@ module.exports = function(io) {
       } catch (error) {
         console.error('[Socket.IO] Error in deleteMessage:', error);
         socket.emit('error', { message: 'Failed to delete message' });
+      }
+    });
+
+    // Clear all direct (1:1) messages in a conversation — requires ONE_TO_ONE_CHAT_MESSAGE DELETE (same as deleting own messages)
+    socket.on('clearDirectChat', async ({ conversationId }) => {
+      try {
+        if (conversationId === undefined || conversationId === null) {
+          socket.emit('error', { message: 'Conversation ID is required' });
+          return;
+        }
+
+        const chatSessionId = BigInt(conversationId);
+
+        const session = await prisma.chatSession.findUnique({
+          where: { id: chatSessionId },
+          include: { participants: true }
+        });
+
+        if (!session) {
+          socket.emit('error', { message: 'Conversation not found' });
+          return;
+        }
+
+        if (!session.participants.some((p) => p.userId === userId)) {
+          socket.emit('error', { message: 'Not a participant in this conversation' });
+          return;
+        }
+
+        const permissions = await getUserPermissions({ id: userId });
+        if (!userMayDeleteOwnDirectMessage(permissions)) {
+          socket.emit('error', { message: 'You do not have permission to clear one-to-one chat history' });
+          return;
+        }
+
+        await prisma.message.deleteMany({
+          where: { chatSessionId }
+        });
+
+        await prisma.chatSession.update({
+          where: { id: chatSessionId },
+          data: {
+            lastMessageAt: null,
+            updatedAt: new Date()
+          }
+        });
+
+        await updateUnreadCount(chatSessionId);
+
+        const convRoomId = session.id.toString();
+        io.to(`conversation_${convRoomId}`).emit('directChatCleared', {
+          conversationId: convRoomId,
+          clearedByUserId: userId,
+          timestamp: new Date()
+        });
+      } catch (error) {
+        console.error('[Socket.IO] Error in clearDirectChat:', error);
+        socket.emit('error', { message: 'Failed to clear chat history' });
       }
     });
 
