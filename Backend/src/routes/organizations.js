@@ -7,7 +7,7 @@ const router = express.Router();
 
 // Import middleware
 const { authenticateToken } = require('../middleware/auth');
-const { requireOrgAdmin, requireOrgUser } = require('../middleware/auth');
+const { requireOrgAdmin, requireOrganizationReadAccess } = require('../middleware/auth');
 const { getOrganizationById, updateOrganization, getLeadAssignmentMode, getWhitelisting, updateWhitelisting, listMobileDevices } = require('../controllers/organizationsController');
 
 /**
@@ -99,7 +99,7 @@ router.use(authenticateToken);
  *               error: "Organization not found"
  */
 // Get organization by ID
-router.get('/:organizationId', requireOrgUser, getOrganizationById);
+router.get('/:organizationId', requireOrganizationReadAccess, getOrganizationById);
 router.get('/:organizationId/whitelisting', requireOrgAdmin, getWhitelisting);
 router.put('/:organizationId/whitelisting', requireOrgAdmin, updateWhitelisting);
 router.get('/:organizationId/mobile-devices', requireOrgAdmin, listMobileDevices);

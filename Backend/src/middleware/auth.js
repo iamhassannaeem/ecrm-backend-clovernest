@@ -608,6 +608,42 @@ const requireOrgUser = (req, res, next) => {
   next();
 };
 
+/** GET /api/organizations/:id — super admin, org-settings role, or any user belonging to that org */
+const requireOrganizationReadAccess = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Authentication required',
+      code: 'AUTH_REQUIRED'
+    });
+  }
+
+  const organizationId = parseInt(req.params.organizationId, 10);
+  if (Number.isNaN(organizationId)) {
+    return res.status(400).json({
+      error: 'Invalid organization ID',
+      code: 'INVALID_ORG_ID'
+    });
+  }
+
+  const isSuperAdmin = isSuperAdminUser(req.user);
+  const hasOrgSettings = req.user.permissions && req.user.permissions.some((perm) =>
+    (perm.action === 'ALL' && perm.resource === 'ALL') ||
+    (perm.resource === 'ORGANIZATION_SETTINGS' &&
+      ['READ', 'UPDATE', 'MANAGE'].includes(perm.action))
+  );
+  const sameOrg = Number(req.user.organizationId) === organizationId;
+
+  if (isSuperAdmin || hasOrgSettings || sameOrg) {
+    req.organizationId = organizationId;
+    return next();
+  }
+
+  return res.status(403).json({
+    error: 'You do not have access to this organization',
+    code: 'ORG_ACCESS_DENIED'
+  });
+};
+
 
 const requirePermission = (action, resource) => {
   return (req, res, next) => {
@@ -705,8 +741,10 @@ module.exports = {
   requireOrgUserAccess,
   requireOrgAdmin,
   requireOrgUser,
+  requireOrganizationReadAccess,
   requirePermission,
   requireSystemPermission,
   checkPermission,
-  allowSelfOrPermission
+  allowSelfOrPermission,
+  isSuperAdminUser
 };

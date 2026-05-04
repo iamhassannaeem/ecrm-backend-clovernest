@@ -2,6 +2,53 @@ const { DateTime } = require('luxon');
 const { prisma } = require('../config/database');
 const PermissionService = require('../services/permissionService');
 
+function isSuperAdminUser(user) {
+  if (!user) return false;
+  return (
+    user.systemRole === 'SUPER_ADMIN' ||
+    (user.roles &&
+      user.roles.some((r) => r.name === 'SUPER_ADMIN' || r.name === 'Super Admin'))
+  );
+}
+
+function hasOrganizationAdminRole(user) {
+  return Boolean(
+    user?.roles && user.roles.some((r) => r.name === 'ORGANIZATION_ADMIN')
+  );
+}
+
+/** Full org row (incl. sensitive fields) — org admin, org-settings permission, super admin, etc. */
+function canReadFullOrganizationRecord(user) {
+  if (isSuperAdminUser(user)) return true;
+  if (hasOrganizationAdminRole(user)) return true;
+  if (!user || !user.permissions) return false;
+  return user.permissions.some(
+    (p) =>
+      (p.action === 'ALL' && p.resource === 'ALL') ||
+      (p.resource === 'ORGANIZATION_SETTINGS' &&
+        ['READ', 'UPDATE', 'MANAGE'].includes(p.action))
+  );
+}
+
+/** Branding, locale, and chat UI fields for normal members without org-settings permission */
+function toMemberOrganizationView(org) {
+  if (!org) return null;
+  return {
+    id: org.id,
+    name: org.name,
+    slug: org.slug,
+    domain: org.domain,
+    description: org.description,
+    logo: org.logo,
+    website: org.website,
+    currency: org.currency,
+    language: org.language,
+    timeZone: org.timeZone,
+    chatDisplayMode: org.chatDisplayMode,
+    isActive: org.isActive
+  };
+}
+
 exports.getOrganizationById = async (req, res, next) => {
   try {
     const organizationId = parseInt(req.params.organizationId, 10);
@@ -24,8 +71,20 @@ exports.getOrganizationById = async (req, res, next) => {
     if (!organization) {
       return res.status(404).json({ error: 'Organization not found' });
     }
-    const filteredOrganizations = await PermissionService.filterOrganizations(req.user, [organization]);
-    
+
+    if (!canReadFullOrganizationRecord(req.user)) {
+      return res.json({ organization: toMemberOrganizationView(organization) });
+    }
+
+    let filteredOrganizations = await PermissionService.filterOrganizations(req.user, [organization]);
+
+    if (
+      filteredOrganizations.length === 0 &&
+      Number(req.user.organizationId) === organizationId
+    ) {
+      filteredOrganizations = [organization];
+    }
+
     if (filteredOrganizations.length === 0) {
       return res.status(403).json({
         error: 'You don\'t have permission to view this organization. Required organization permissions.',
