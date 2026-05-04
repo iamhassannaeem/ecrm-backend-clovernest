@@ -1,5 +1,16 @@
-const { universalPermissionCheck, checkRoutePermission } = require('./auth');
+const { universalPermissionCheck, checkRoutePermission, isSuperAdminUser } = require('./auth');
 const { accessControlMiddleware } = require('./accessControl');
+const PermissionService = require('../services/permissionService');
+
+function hasOrganizationSettingsPermission(user) {
+  if (!user || !user.permissions) return false;
+  if (isSuperAdminUser(user)) return true;
+  return user.permissions.some(
+    (p) =>
+      (p.action === 'ALL' && p.resource === 'ALL') ||
+      (p.resource === 'ORGANIZATION_SETTINGS' && ['READ', 'UPDATE', 'MANAGE'].includes(p.action))
+  );
+}
 
 
 const routePermissions = {
@@ -213,7 +224,19 @@ const globalPermissionMiddleware = (req, res, next) => {
     }
     accessControlMiddleware(req, res, (accessErr) => {
       if (accessErr) return next(accessErr);
-   
+
+    // Members may GET their own organization without ORGANIZATION_SETTINGS (payload limited in controller).
+    const orgGetMatch = req.method === 'GET' && req.path.match(/^\/api\/organizations\/(\d+)$/);
+    if (orgGetMatch && req.user) {
+      const oid = parseInt(orgGetMatch[1], 10);
+      if (
+        !hasOrganizationSettingsPermission(req.user) &&
+        PermissionService.canAccessOrganization(req.user, oid)
+      ) {
+        return next();
+      }
+    }
+
     const requiredPermission = matchRoute(req.path, req.method);
     
     if (!requiredPermission) {
